@@ -26,6 +26,7 @@ const (
 	ReContinue
 	ReBreak
 	ReFileEnd
+	ReCanceled
 )
 
 var (

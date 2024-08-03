@@ -50,13 +50,12 @@ func NewReplParser(ctx context.Context, c *config.Config,
 		ParseTime:               false, //do not parse mysql datetime/time column into go time structure, take it as string
 		UseDecimal:              false, // sqlbuilder not support decimal type
 	}
-	replSyncer := replication.NewBinlogSyncer(replCfg)
 
 	r := &ReplParser{
 		ctx:       ctx,
 		config:    c,
 		binlog:    c.StartFile,
-		syncer:    replSyncer,
+		syncer:    replication.NewBinlogSyncer(replCfg),
 		eventChan: eventChan,
 		statChan:  statChan,
 		startPos:  mysql.Position{Name: c.StartFile, Pos: uint32(c.StartPos)},
@@ -76,18 +75,21 @@ func NewReplParser(ctx context.Context, c *config.Config,
 }
 
 func (r *ReplParser) Start() error {
+	defer r.Stop()
+
 	var (
 		err error
 		ev  *replication.BinlogEvent
 
-		binEventIdx, trxIndex uint64
-		trxStatus             int
+		binEventIdx, trxIdx uint64
+		trxStatus           int
 
 		db, tb, text      string
 		sqlLower, sqlType string
 		rowCnt, tbMapPos  uint32
 	)
 
+	log.Logger.Info("starting to get binlog from mysql")
 	replStreamer, err := r.syncer.StartSync(r.startPos)
 	if err != nil {
 		log.Logger.Error("error replication from master, err: %v", err)
@@ -114,7 +116,8 @@ func (r *ReplParser) Start() error {
 			// avoid mysqlbing mask the row event as unknown table row event
 			tbMapPos = ev.Header.LogPos - ev.Header.EventSize
 		}
-		ev.RawData = []byte{} // we don't need raw data
+		// we don't need raw data
+		ev.RawData = []byte{}
 
 		oneEvent := models.NewMyBinEvent(r.binlog, ev.Header.LogPos, tbMapPos)
 		state := oneEvent.CheckBinEvent(r.config, ev, &r.binlog)
@@ -129,7 +132,7 @@ func (r *ReplParser) Start() error {
 			sqlLower = strings.ToLower(text)
 			if sqlLower == "begin" {
 				trxStatus = vars.TrxBegin
-				trxIndex++
+				trxIdx++
 			} else if sqlLower == "commit" {
 				trxStatus = vars.TrxCommit
 			} else if sqlLower == "rollback" {
@@ -148,7 +151,7 @@ func (r *ReplParser) Start() error {
 			oneEvent.EventIdx = binEventIdx
 			oneEvent.SQLType = sqlType
 			oneEvent.Timestamp = ev.Header.Timestamp
-			oneEvent.TrxIndex = trxIndex
+			oneEvent.TrxIndex = trxIdx
 			oneEvent.TrxStatus = trxStatus
 			r.eventChan <- oneEvent
 		}
@@ -189,4 +192,5 @@ func (r *ReplParser) Stop() {
 	if r.syncer != nil {
 		r.syncer.Close()
 	}
+	log.Logger.Info("finished getting binlog from mysql")
 }

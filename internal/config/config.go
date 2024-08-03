@@ -230,7 +230,6 @@ func (c *Config) ParseConfig(dbs, tbs, ignoreDBs, ignoreTBs, sqlTypes, startTime
 	if c.StartFile != "" {
 		c.IfSetStartFilePos = true
 		c.StartFilePos = mysql.Position{Name: c.StartFile, Pos: uint32(c.StartPos)}
-
 	} else {
 		c.IfSetStartFilePos = false
 	}
