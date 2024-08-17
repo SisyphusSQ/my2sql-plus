@@ -44,6 +44,11 @@ var (
 	}
 )
 
+const (
+	ShowKeys    = "SHOW INDEX FROM `%s`.`%s`"
+	ShowColumns = "SHOW COLUMNS FROM `%s`.`%s`"
+)
+
 func GetMinValueOfRange(opt string) int {
 	return GOptsValueRange[opt][0]
 }

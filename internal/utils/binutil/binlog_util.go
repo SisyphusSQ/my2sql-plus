@@ -1,6 +1,10 @@
 package binutil
 
-import "github.com/go-mysql-org/go-mysql/replication"
+import (
+	"fmt"
+
+	"github.com/go-mysql-org/go-mysql/replication"
+)
 
 func GetInfoFromBinevent(ev *replication.BinlogEvent) (string, string, string, string, uint32) {
 	var (
@@ -59,4 +63,8 @@ func GetInfoFromBinevent(ev *replication.BinlogEvent) (string, string, string, s
 		// do nothing
 	}
 	return db, tb, sqlType, sql, rowCnt
+}
+
+func GetPosStr(name string, spos uint32, epos uint32) string {
+	return fmt.Sprintf("%s %d-%d", name, spos, epos)
 }

@@ -1,8 +1,7 @@
-package parser
+package extract
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -19,7 +18,7 @@ import (
 	"github.com/SisyphusSQ/my2sql/internal/vars"
 )
 
-type FileParser struct {
+type FileExtract struct {
 	ctx context.Context
 
 	binlog      string
@@ -27,19 +26,16 @@ type FileParser struct {
 	binEventIdx uint64
 	startPos    mysql.Position
 	config      *config.Config
-	fromDB      *sql.DB
 	parser      *replication.BinlogParser
 
 	eventChan chan<- *models.MyBinEvent
 	statChan  chan<- *models.BinEventStats
 }
 
-func NewFileParser(ctx context.Context, c *config.Config,
+func NewFileExtract(ctx context.Context, c *config.Config,
 	eventChan chan *models.MyBinEvent,
-	statChan chan *models.BinEventStats) (*FileParser, error) {
-
-	var err error
-	f := &FileParser{
+	statChan chan *models.BinEventStats) *FileExtract {
+	f := &FileExtract{
 		ctx:       ctx,
 		config:    c,
 		binlog:    c.StartFile,
@@ -51,21 +47,10 @@ func NewFileParser(ctx context.Context, c *config.Config,
 			Pos:  uint32(c.StartPos),
 		},
 	}
-
-	// todo if loc isn't default?
-	dsn := fmt.Sprintf(
-		"%s:%s@tcp(%s:%d)/?autocommit=true&charset=utf8mb4,utf8,latin1&loc=Local&parseTime=true",
-		c.User, c.Passwd, c.Host, c.Port)
-	f.fromDB, err = utils.CreateMysqlConn(dsn)
-	if err != nil {
-		log.Logger.Error("error creating mysql connection: %v", err)
-		return nil, err
-	}
-
-	return f, nil
+	return f
 }
 
-func (f *FileParser) Start() error {
+func (f *FileExtract) Start() error {
 	defer f.Stop()
 	log.Logger.Info("starting to parse binlog from local files")
 
@@ -109,7 +94,7 @@ func (f *FileParser) Start() error {
 	}
 }
 
-func (f *FileParser) parsePerFile(fileName string, pos int64) (int, error) {
+func (f *FileExtract) parsePerFile(fileName string, pos int64) (int, error) {
 	var (
 		err               error
 		db, tb, text      string
@@ -198,7 +183,7 @@ func (f *FileParser) parsePerFile(fileName string, pos int64) (int, error) {
 	return vars.ReFileEnd, nil
 }
 
-func (f *FileParser) getFirstBinlogPosToParse() (string, int64) {
+func (f *FileExtract) getFirstBinlogPosToParse() (string, int64) {
 	var binlog string
 	var pos int64
 	if f.config.StartFile != "" {
@@ -215,15 +200,11 @@ func (f *FileParser) getFirstBinlogPosToParse() (string, int64) {
 	return binlog, pos
 }
 
-func (f *FileParser) Binlog() string {
+func (f *FileExtract) Binlog() string {
 	return f.binlog
 }
 
-func (f *FileParser) Stop() {
-	if f.fromDB != nil {
-		f.fromDB.Close()
-	}
-
+func (f *FileExtract) Stop() {
 	if f.parser != nil {
 		f.parser.Stop()
 	}

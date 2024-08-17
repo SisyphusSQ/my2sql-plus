@@ -1,10 +1,8 @@
-package parser
+package extract
 
 import (
 	"context"
-	"database/sql"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -14,29 +12,26 @@ import (
 	"github.com/SisyphusSQ/my2sql/internal/config"
 	"github.com/SisyphusSQ/my2sql/internal/log"
 	"github.com/SisyphusSQ/my2sql/internal/models"
-	"github.com/SisyphusSQ/my2sql/internal/utils"
 	"github.com/SisyphusSQ/my2sql/internal/utils/binutil"
 	"github.com/SisyphusSQ/my2sql/internal/vars"
 )
 
-type ReplParser struct {
+type ReplExtract struct {
 	ctx context.Context
 
 	binlog       string
 	eventTimeout time.Duration
 	startPos     mysql.Position
 	config       *config.Config
-	fromDB       *sql.DB
 	syncer       *replication.BinlogSyncer
 
 	eventChan chan<- *models.MyBinEvent
 	statChan  chan<- *models.BinEventStats
 }
 
-func NewReplParser(ctx context.Context, c *config.Config,
+func NewReplExtract(ctx context.Context, c *config.Config,
 	eventChan chan *models.MyBinEvent,
-	statChan chan *models.BinEventStats) (*ReplParser, error) {
-	var err error
+	statChan chan *models.BinEventStats) *ReplExtract {
 	replCfg := replication.BinlogSyncerConfig{
 		ServerID:                uint32(c.ServerId),
 		Flavor:                  c.MySQLType,
@@ -44,14 +39,14 @@ func NewReplParser(ctx context.Context, c *config.Config,
 		Port:                    uint16(c.Port),
 		User:                    c.User,
 		Password:                c.Passwd,
-		Charset:                 "utf8",
+		Charset:                 "utf8mb4",
 		SemiSyncEnabled:         false,
 		TimestampStringLocation: c.GTimeLocation,
 		ParseTime:               false, //do not parse mysql datetime/time column into go time structure, take it as string
 		UseDecimal:              false, // sqlbuilder not support decimal type
 	}
 
-	r := &ReplParser{
+	r := &ReplExtract{
 		ctx:       ctx,
 		config:    c,
 		binlog:    c.StartFile,
@@ -60,26 +55,15 @@ func NewReplParser(ctx context.Context, c *config.Config,
 		statChan:  statChan,
 		startPos:  mysql.Position{Name: c.StartFile, Pos: uint32(c.StartPos)},
 	}
-
-	// todo if loc isn't default?
-	dsn := fmt.Sprintf(
-		"%s:%s@tcp(%s:%d)/?autocommit=true&charset=utf8mb4,utf8,latin1&loc=Local&parseTime=true",
-		c.User, c.Passwd, c.Host, c.Port)
-	r.fromDB, err = utils.CreateMysqlConn(dsn)
-	if err != nil {
-		log.Logger.Error("error creating mysql connection: %v", err)
-		return nil, err
-	}
-
-	return r, nil
+	return r
 }
 
-func (r *ReplParser) Start() error {
+func (r *ReplExtract) Start() error {
 	defer r.Stop()
 
 	var (
 		err error
-		ev  *replication.BinlogEvent
+		ev  = new(replication.BinlogEvent)
 
 		binEventIdx, trxIdx uint64
 		trxStatus           int
@@ -180,15 +164,11 @@ func (r *ReplParser) Start() error {
 	}
 }
 
-func (r *ReplParser) Binlog() string {
+func (r *ReplExtract) Binlog() string {
 	return r.binlog
 }
 
-func (r *ReplParser) Stop() {
-	if r.fromDB != nil {
-		_ = r.fromDB.Close()
-	}
-
+func (r *ReplExtract) Stop() {
 	if r.syncer != nil {
 		r.syncer.Close()
 	}
