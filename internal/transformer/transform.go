@@ -3,9 +3,11 @@ package transformer
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	sql "github.com/dropbox/godropbox/database/sqlbuilder"
@@ -22,6 +24,7 @@ import (
 )
 
 type Transformer struct {
+	wg  *sync.WaitGroup
 	ctx context.Context
 
 	binlog    string
@@ -49,19 +52,18 @@ type Transformer struct {
 
 	eventChan <-chan *models.MyBinEvent
 
-	sqlChan  chan<- *models.ResultSQL
-	jsonChan chan<- []*models.JsonEvent
+	sqlChan chan<- *models.ResultSQL
 }
 
-func NewTransformer(ctx context.Context,
+func NewTransformer(wg *sync.WaitGroup, ctx context.Context,
 	threadNum int,
 	c *config.Config,
 	tbColsInfo *models.TblColsInfo,
 	eventChan chan *models.MyBinEvent,
 	sqlChan chan *models.ResultSQL,
-	jsonChan chan []*models.JsonEvent,
 	trxLock *locker.TrxLock) *Transformer {
 	t := &Transformer{
+		wg:        wg,
 		ctx:       ctx,
 		threadNum: threadNum,
 
@@ -74,7 +76,6 @@ func NewTransformer(ctx context.Context,
 		tbColsInfo: tbColsInfo,
 		eventChan:  eventChan,
 		sqlChan:    sqlChan,
-		jsonChan:   jsonChan,
 
 		trxLock: trxLock,
 	}
@@ -147,8 +148,7 @@ func (t *Transformer) generate(ev *models.MyBinEvent) error {
 	for {
 		t.trxLock.Lock()
 		if t.trxLock.EvIdx() == t.ev.EventIdx {
-			t.sqlChan <- &models.ResultSQL{SQLs: sqls, SQLInfo: extractInfo}
-			t.jsonChan <- jsonEvents
+			t.sqlChan <- &models.ResultSQL{SQLs: sqls, Jsons: jsonEvents, SQLInfo: extractInfo}
 
 			t.trxLock.IncrEvIdx()
 			t.trxLock.Unlock()
@@ -168,6 +168,7 @@ func (t *Transformer) Stop() {
 	// t.tbColsInfo is shared with multi transformers, so that close it by outer func
 	// t.tbColsInfo.Stop()
 
+	t.wg.Done()
 	log.Logger.Info(fmt.Sprintf("exit thread %d to generate redo/rollback sql", t.threadNum))
 }
 
@@ -517,13 +518,13 @@ func (t *Transformer) genEqCond(row []any) []sql.BoolExpression {
 }
 
 // transform2Json start to transform event to json
-func (t *Transformer) transform2Json() []*models.JsonEvent {
+func (t *Transformer) transform2Json() []string {
 	var (
 		step       = 1
 		rows       = t.ev.BinEvent.Rows
 		sqlType    = t.ev.SQLType
 		tbInfo     = t.curTbInfo
-		jsonEvents = make([]*models.JsonEvent, 0)
+		jsonEvents = make([]string, 0)
 	)
 
 	if sqlType == "update" {
@@ -548,7 +549,12 @@ func (t *Transformer) transform2Json() []*models.JsonEvent {
 			event.RowAfter = t.genRowMap(rows[i+1])
 		}
 
-		jsonEvents = append(jsonEvents, event)
+		data, err := json.Marshal(event)
+		if err != nil {
+			log.Logger.Error("canalEvent can not be marshaled, value: %v", event)
+			continue
+		}
+		jsonEvents = append(jsonEvents, string(data))
 	}
 	return jsonEvents
 }

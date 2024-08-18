@@ -83,7 +83,7 @@ type Config struct {
 
 	PrintExtraInfo bool
 
-	Threads uint
+	Threads int
 
 	ReadTblDefJsonFile string
 	OnlyColFromFile    bool
@@ -307,8 +307,8 @@ func (c *Config) ParseConfig(dbs, tbs, ignoreDBs, ignoreTBs, sqlTypes, startTime
 	}
 
 	// check --threads
-	if c.Threads != uint(vars.GetDefaultValueOfRange("Threads")) {
-		vars.CheckValueInRange("Threads", int(c.Threads), "value of -t out of range", true)
+	if c.Threads != vars.GetDefaultValueOfRange("Threads") {
+		vars.CheckValueInRange("Threads", c.Threads, "value of -t out of range", true)
 	}
 }
 

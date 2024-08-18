@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
-	"strings"
-
 	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/go-mysql-org/go-mysql/replication"
+	"path/filepath"
+	"strings"
+	"sync"
 
 	"github.com/SisyphusSQ/my2sql/internal/config"
 	"github.com/SisyphusSQ/my2sql/internal/log"
@@ -19,6 +19,7 @@ import (
 )
 
 type FileExtract struct {
+	wg  *sync.WaitGroup
 	ctx context.Context
 
 	binlog      string
@@ -32,10 +33,12 @@ type FileExtract struct {
 	statChan  chan<- *models.BinEventStats
 }
 
-func NewFileExtract(ctx context.Context, c *config.Config,
+func NewFileExtract(wg *sync.WaitGroup, ctx context.Context,
+	c *config.Config,
 	eventChan chan *models.MyBinEvent,
 	statChan chan *models.BinEventStats) *FileExtract {
 	f := &FileExtract{
+		wg:        wg,
 		ctx:       ctx,
 		config:    c,
 		binlog:    c.StartFile,
@@ -209,5 +212,6 @@ func (f *FileExtract) Stop() {
 		f.parser.Stop()
 	}
 
+	f.wg.Done()
 	log.Logger.Info("finished parsing binlog from local files")
 }

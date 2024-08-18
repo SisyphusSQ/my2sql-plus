@@ -32,6 +32,7 @@ type ExtraInfo struct {
 
 type ResultSQL struct {
 	SQLs    []string
+	Jsons   []string
 	SQLInfo ExtraInfo
 }
 

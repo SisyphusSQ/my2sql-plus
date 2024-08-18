@@ -18,13 +18,12 @@ import (
 	"github.com/SisyphusSQ/my2sql/internal/vars"
 )
 
-type StatsLoad struct {
+type StatsLoader struct {
 	sync.Mutex
+	wg  *sync.WaitGroup
 	ctx context.Context
 
-	absTables  map[string]struct{}
-	lastBinlog string
-
+	lastBinlog  string
 	bigTrxRows  int
 	longTrxSecs int
 	interval    *time.Ticker
@@ -39,12 +38,13 @@ type StatsLoad struct {
 	statsChan <-chan *models.BinEventStats
 }
 
-func NewStatsLoad(ctx context.Context, c *config.Config, statsChan chan *models.BinEventStats) (*StatsLoad, error) {
+func NewStatsLoader(wg *sync.WaitGroup, ctx context.Context,
+	c *config.Config, statsChan chan *models.BinEventStats) (*StatsLoader, error) {
 	var err error
-	s := &StatsLoad{
+	s := &StatsLoader{
+		wg:  wg,
 		ctx: ctx,
 
-		absTables:   make(map[string]struct{}),
 		interval:    time.NewTicker(time.Duration(c.PrintInterval)),
 		bigTrxRows:  c.BigTrxRowLimit,
 		longTrxSecs: c.LongTrxSeconds,
@@ -74,9 +74,9 @@ func NewStatsLoad(ctx context.Context, c *config.Config, statsChan chan *models.
 	return s, nil
 }
 
-func (s *StatsLoad) Start() error {
+func (s *StatsLoader) Start() error {
 	log.Logger.Info("start thread to analyze statistics from binlog")
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -98,7 +98,7 @@ func (s *StatsLoad) Start() error {
 	}
 }
 
-func (s *StatsLoad) handleStats(st *models.BinEventStats) {
+func (s *StatsLoader) handleStats(st *models.BinEventStats) {
 	if s.lastBinlog != st.Binlog {
 		s.writeStats()
 	}
@@ -155,7 +155,7 @@ func (s *StatsLoad) handleStats(st *models.BinEventStats) {
 	s.collectStats(absTable, st)
 }
 
-func (s *StatsLoad) collectStats(t string, st *models.BinEventStats) {
+func (s *StatsLoader) collectStats(t string, st *models.BinEventStats) {
 	if _, ok := s.stats[t]; !ok {
 		s.stats[t] = &models.StatsPrint{
 			StartTime: int64(st.Timestamp),
@@ -180,7 +180,7 @@ func (s *StatsLoad) collectStats(t string, st *models.BinEventStats) {
 	s.stats[t].StopPos = st.StopPos
 }
 
-func (s *StatsLoad) writeStats() {
+func (s *StatsLoader) writeStats() {
 	s.Lock()
 	defer s.Unlock()
 	for _, st := range s.stats {
@@ -192,7 +192,7 @@ func (s *StatsLoad) writeStats() {
 	s.stats = make(map[string]*models.StatsPrint)
 }
 
-func (s *StatsLoad) writeTrx() {
+func (s *StatsLoader) writeTrx() {
 	ss := make([]string, 0, len(s.trx.Statements))
 	for absTable, info := range s.trx.Statements {
 		ss = append(ss, fmt.Sprintf("%s(inserts=%d, updates=%d, deletes=%d)", absTable, info["insert"], info["update"], info["delete"]))
@@ -206,11 +206,11 @@ func (s *StatsLoad) writeTrx() {
 	)
 }
 
-func (s *StatsLoad) LastBinlog() string {
+func (s *StatsLoader) LastBinlog() string {
 	return s.lastBinlog
 }
 
-func (s *StatsLoad) Stop() {
+func (s *StatsLoader) Stop() {
 	s.interval.Stop()
 
 	// ---------- close file ----------
@@ -220,5 +220,6 @@ func (s *StatsLoad) Stop() {
 	_ = s.trxFile.Close()
 	_ = s.statsFile.Close()
 
+	s.wg.Done()
 	log.Logger.Info("exit thread to analyze statistics from binlog")
 }

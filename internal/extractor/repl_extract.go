@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-mysql-org/go-mysql/mysql"
@@ -17,6 +18,7 @@ import (
 )
 
 type ReplExtract struct {
+	wg  *sync.WaitGroup
 	ctx context.Context
 
 	binlog       string
@@ -29,7 +31,8 @@ type ReplExtract struct {
 	statsChan chan<- *models.BinEventStats
 }
 
-func NewReplExtract(ctx context.Context, c *config.Config,
+func NewReplExtract(wg *sync.WaitGroup, ctx context.Context,
+	c *config.Config,
 	eventChan chan *models.MyBinEvent,
 	statsChan chan *models.BinEventStats) *ReplExtract {
 	replCfg := replication.BinlogSyncerConfig{
@@ -47,6 +50,7 @@ func NewReplExtract(ctx context.Context, c *config.Config,
 	}
 
 	r := &ReplExtract{
+		wg:        wg,
 		ctx:       ctx,
 		config:    c,
 		binlog:    c.StartFile,
@@ -172,5 +176,7 @@ func (r *ReplExtract) Stop() {
 	if r.syncer != nil {
 		r.syncer.Close()
 	}
+
+	r.wg.Done()
 	log.Logger.Info("finished getting binlog from mysql")
 }

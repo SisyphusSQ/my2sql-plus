@@ -1,11 +1,23 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"os"
+	"os/signal"
+	"runtime"
+	"runtime/pprof"
+	"sync"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
 	"github.com/SisyphusSQ/my2sql/internal/config"
+	"github.com/SisyphusSQ/my2sql/internal/core"
+	"github.com/SisyphusSQ/my2sql/internal/locker"
+	"github.com/SisyphusSQ/my2sql/internal/log"
+	"github.com/SisyphusSQ/my2sql/internal/models"
 	"github.com/SisyphusSQ/my2sql/internal/utils"
 	"github.com/SisyphusSQ/my2sql/internal/vars"
 )
@@ -22,6 +34,9 @@ var (
 	startTime        string
 	stopTime         string
 	doNotAddPrefixDB bool
+
+	cpuprofile string
+	memprofile string
 )
 
 var runCmd = &cobra.Command{
@@ -30,11 +45,171 @@ var runCmd = &cobra.Command{
 	Example: fmt.Sprintf("%s run ...\n", "my2sql"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c.ParseConfig(dbs, tbs, ignoreDBs, ignoreTBs, sqlTypes, startTime, stopTime, doNotAddPrefixDB)
-		return nil
+
+		var (
+			extractWg       sync.WaitGroup
+			transWg         sync.WaitGroup
+			loadWg          sync.WaitGroup
+			totalRoutines   int
+			finishRoutines  int
+			tbColsInfo, err = models.NewTblColsInfo(c)
+			errChan         = make(chan error)
+			lock            = locker.NewTrxLock()
+			ctx, cancel     = context.WithCancel(context.Background())
+			chanCap         = c.Threads * 2
+			eventChan       = make(chan *models.MyBinEvent, chanCap)
+			statChan        = make(chan *models.BinEventStats, chanCap)
+			sqlChan         = make(chan *models.ResultSQL, chanCap)
+		)
+
+		if err != nil {
+			cancel()
+			return err
+		}
+
+		go func() {
+			loadWg.Add(1)
+			totalRoutines++
+			statsLoader, err := core.NewLoader("stats", &loadWg, ctx, c, "", sqlChan, statChan)
+			if err != nil {
+				log.Logger.Fatal("create %s loader failed, err: %v", "stats", err)
+			}
+			defer statsLoader.Stop()
+
+			errChan <- statsLoader.Start()
+		}()
+
+		if c.WorkType != "stats" {
+			for _, t := range []string{c.WorkType, "json"} {
+				loadWg.Add(1)
+				totalRoutines++
+				load, err := core.NewLoader("stats", &loadWg, ctx, c, t, sqlChan, statChan)
+				if err != nil {
+					log.Logger.Error("create %s loader failed, err: %v", t, err)
+					cancel()
+					return err
+				}
+
+				go func() {
+					errChan <- load.Start()
+					load.Stop()
+				}()
+			}
+
+			for i := range c.Threads {
+				transWg.Add(1)
+				totalRoutines++
+				transform := core.NewTransformer("default", &transWg, ctx, i, c, tbColsInfo, eventChan, sqlChan, lock)
+
+				go func() {
+					errChan <- transform.Start()
+					transform.Stop()
+				}()
+			}
+		}
+
+		extractWg.Add(1)
+		totalRoutines++
+		extract := core.NewExtractor(c.Mode, &extractWg, ctx, c, eventChan, statChan)
+		go func() {
+			errChan <- extract.Start()
+			extract.Stop()
+		}()
+
+		f := StartCpuProfile()
+		defer StopCpuProfile(f)
+
+		// finish cpu perf profiling before ctrl-C/kill/kill -15
+		ch := make(chan os.Signal, 5)
+		signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
+		go func() {
+			errChan <- func() error {
+				for {
+					sig := <-ch
+					switch sig {
+					case syscall.SIGINT, syscall.SIGTERM:
+						log.Logger.Debug("Terminating process, will finish cpu pprof before exit(if specified)...")
+						StopCpuProfile(f)
+						return errors.New("finished by ctrl-C/kill/kill -15")
+					default:
+						// do nothing
+					}
+				}
+			}()
+		}()
+
+		for {
+			select {
+			case err := <-errChan:
+				finishRoutines++
+				if err != nil {
+					log.Logger.Error("my2sql-plus got err, err: %v", err)
+					cancel()
+					goto exit
+				}
+
+				if totalRoutines == finishRoutines {
+					cancel() // actually, no need to cancel
+					goto exit
+				}
+			}
+		}
+
+	exit:
+		extractWg.Wait()
+		transWg.Wait()
+		loadWg.Wait()
+
+		close(eventChan)
+		close(sqlChan)
+		close(statChan)
+		return err
 	},
 }
 
+func StartCpuProfile() *os.File {
+	if cpuprofile != "" {
+		f, err := os.Create(cpuprofile)
+		if err != nil {
+			log.Logger.Fatal("could not create CPU profile: ", err)
+		}
+		if err = pprof.StartCPUProfile(f); err != nil {
+			log.Logger.Fatal("could not start CPU profile: ", err)
+		}
+		log.Logger.Info("cpu pprof start ...")
+		return f
+	}
+	return nil
+}
+
+func StopCpuProfile(f *os.File) {
+	if f != nil {
+		pprof.StopCPUProfile()
+		f.Close()
+		log.Logger.Info("cpu pprof stopped [file=%s]!", cpuprofile)
+		return
+	}
+}
+
+func MemProfile() {
+	if memprofile != "" {
+		f, err := os.Create(memprofile)
+		if err != nil {
+			log.Logger.Fatal("could not create memory profile: ", err)
+		}
+		defer f.Close()
+		runtime.GC() // get up-to-date statistics
+		if err = pprof.WriteHeapProfile(f); err != nil {
+			log.Logger.Fatal("could not write memory profile: ", err)
+		}
+		log.Logger.Info("mem pprof done [file=%s]!", memprofile)
+	}
+}
+
 func initRun() {
+	runCmd.Flags().StringVar(&cpuprofile, "cpuprofile", "", "write cpu profile to `file`")
+	runCmd.Flags().StringVar(&memprofile, "memprofile", "", "write memory profile to `file`")
+
 	runCmd.Flags().StringVar(&c.Mode, "mode", "repl", utils.SliceToString(vars.GOptsValidMode, vars.JoinSepComma, vars.ValidOptMsg)+". repl: as a slave to get binlogs from master. file: get binlogs from local filesystem. default repl")
 	runCmd.Flags().StringVar(&c.WorkType, "work-type", "2sql", utils.SliceToString(vars.GOptsValidWorkType, vars.JoinSepComma, vars.ValidOptMsg)+". 2sql: convert binlog to sqls, rollback: generate rollback sqls, stats: analyze transactions. default: 2sql")
 	runCmd.Flags().StringVar(&c.MySQLType, "mysql-type", "mysql", utils.SliceToString(vars.GOptsValidDBType, vars.JoinSepComma, vars.ValidOptMsg)+". server of binlog, mysql or mariadb, default mysql")
@@ -75,6 +250,6 @@ func initRun() {
 	runCmd.Flags().IntVar(&c.BigTrxRowLimit, "big-trx-row-limit", vars.GetDefaultValueOfRange("BigTrxRowLimit"), "transaction with affected rows greater or equal to this value is considerated as big transaction. "+vars.GetDefaultAndRangeValueMsg("BigTrxRowLimit"))
 	runCmd.Flags().IntVar(&c.LongTrxSeconds, "long-trx-seconds", vars.GetDefaultValueOfRange("LongTrxSeconds"), "transaction with duration greater or equal to this value is considerated as long transaction. "+vars.GetDefaultAndRangeValueMsg("LongTrxSeconds"))
 
-	runCmd.Flags().UintVar(&c.Threads, "threads", uint(vars.GetDefaultValueOfRange("Threads")), "Works with -workType=2sql|rollback. threads to run")
+	runCmd.Flags().IntVar(&c.Threads, "threads", vars.GetDefaultValueOfRange("Threads"), "Works with -workType=2sql|rollback. threads to run")
 	rootCmd.AddCommand(runCmd)
 }
