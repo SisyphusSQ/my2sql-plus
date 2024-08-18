@@ -1,4 +1,4 @@
-package extract
+package extractor
 
 import (
 	"context"
@@ -26,12 +26,12 @@ type ReplExtract struct {
 	syncer       *replication.BinlogSyncer
 
 	eventChan chan<- *models.MyBinEvent
-	statChan  chan<- *models.BinEventStats
+	statsChan chan<- *models.BinEventStats
 }
 
 func NewReplExtract(ctx context.Context, c *config.Config,
 	eventChan chan *models.MyBinEvent,
-	statChan chan *models.BinEventStats) *ReplExtract {
+	statsChan chan *models.BinEventStats) *ReplExtract {
 	replCfg := replication.BinlogSyncerConfig{
 		ServerID:                uint32(c.ServerId),
 		Flavor:                  c.MySQLType,
@@ -52,7 +52,7 @@ func NewReplExtract(ctx context.Context, c *config.Config,
 		binlog:    c.StartFile,
 		syncer:    replication.NewBinlogSyncer(replCfg),
 		eventChan: eventChan,
-		statChan:  statChan,
+		statsChan: statsChan,
 		startPos:  mysql.Position{Name: c.StartFile, Pos: uint32(c.StartPos)},
 	}
 	return r
@@ -142,7 +142,7 @@ func (r *ReplExtract) Start() error {
 
 		// output analysis result whatever the WorkType is
 		if sqlType != "" {
-			r.statChan <- &models.BinEventStats{
+			r.statsChan <- &models.BinEventStats{
 				Timestamp: ev.Header.Timestamp,
 				Binlog:    r.binlog,
 				StartPos:  tbMapPos,

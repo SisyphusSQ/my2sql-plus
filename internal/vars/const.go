@@ -44,10 +44,28 @@ var (
 	}
 )
 
+var (
+	StatsHeaderColumn = []string{"binlog", "start_time", "stop_time",
+		"start_pos", "stop_pos", "inserts", "updates", "deletes", "database", "table"}
+	TrxHeaderColumn = []string{"binlog", "start_time", "stop_time", "start_pos", "stop_pos",
+		"rows", "duration", "tables"}
+	DDLHeaderColumn = []string{"binlog", "time", "start_pos", "stop_pos", "sql"}
+)
+
 const (
 	ShowKeys    = "SHOW INDEX FROM `%s`.`%s`"
 	ShowColumns = "SHOW COLUMNS FROM `%s`.`%s`"
 )
+
+func GetTrxHeader(headers []any) string {
+	//{"binlog", "start_time", "stop_time", "start_pos", "stop_pos", "rows","duration", "tables"}
+	return fmt.Sprintf("%-17s %-19s %-19s %-10s %-10s %-8s %-10s %s\n", headers...)
+}
+
+func GetStatsHeader(headers []any) string {
+	//[binlog, start_time, stop_time, start_pos, stop_pos, inserts, updates, deletes, database, table]
+	return fmt.Sprintf("%-17s %-19s %-19s %-10s %-10s %-8s %-8s %-8s %-15s %-20s\n", headers...)
+}
 
 func GetMinValueOfRange(opt string) int {
 	return GOptsValueRange[opt][0]

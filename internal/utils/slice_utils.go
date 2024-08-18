@@ -35,3 +35,11 @@ func CheckItemInSlice[S ~[]E, E comparable](arr S, element E, prefix string, ifE
 		return false
 	}
 }
+
+func ConvertToSliceAny[S ~[]E, E comparable](ss S) []any {
+	anys := make([]any, 0, len(ss))
+	for _, s := range ss {
+		anys = append(anys, s)
+	}
+	return anys
+}

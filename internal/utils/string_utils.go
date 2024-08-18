@@ -17,3 +17,12 @@ func IsAnyEmpty(ss ...string) bool {
 	}
 	return false
 }
+
+func EqualsAny(str string, ss ...string) bool {
+	for _, s := range ss {
+		if str == s {
+			return true
+		}
+	}
+	return false
+}

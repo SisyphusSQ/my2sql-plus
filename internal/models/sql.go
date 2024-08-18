@@ -19,7 +19,7 @@ type SQLInfo struct {
 	SqlType     int
 }
 
-type ExtraSQLInfo struct {
+type ExtraInfo struct {
 	Schema    string
 	Table     string
 	Binlog    string
@@ -32,5 +32,15 @@ type ExtraSQLInfo struct {
 
 type ResultSQL struct {
 	SQLs    []string
-	SQLInfo ExtraSQLInfo
+	SQLInfo ExtraInfo
+}
+
+type JsonEvent struct {
+	EventType  string         `json:"eventType"`
+	SchemaName string         `json:"schemaName"`
+	TableName  string         `json:"tableName"`
+	Timestamp  uint32         `json:"timestamp"`
+	Position   string         `json:"position"`
+	RowBefore  map[string]any `json:"rowBefore,omitempty"`
+	RowAfter   map[string]any `json:"rowAfter,omitempty"`
 }

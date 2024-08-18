@@ -222,3 +222,9 @@ func (t *TblColsInfo) GetTableKeys(schema, table string) {
 		tableInfo.UniqueKeys = append(tableInfo.UniqueKeys, u)
 	}
 }
+
+func (t *TblColsInfo) Stop() {
+	if t.client != nil {
+		_ = t.client.Close()
+	}
+}

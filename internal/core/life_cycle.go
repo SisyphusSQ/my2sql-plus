@@ -1,9 +1,25 @@
 package core
 
-type Parser interface {
+type LifeCycle interface {
 	Start() error
 
-	Binlog() string
-
 	Stop()
+}
+
+type Extractor interface {
+	LifeCycle
+
+	Binlog() string
+}
+
+type Transformer interface {
+	LifeCycle
+
+	CurPos() string
+}
+
+type Loader interface {
+	LifeCycle
+
+	LastBinlog() string
 }

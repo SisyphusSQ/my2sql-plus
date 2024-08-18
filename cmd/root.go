@@ -2,11 +2,11 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/SisyphusSQ/my2sql/internal/log"
 	"os"
 
 	"github.com/spf13/cobra"
 
+	"github.com/SisyphusSQ/my2sql/internal/log"
 	"github.com/SisyphusSQ/my2sql/internal/vars"
 )
 
@@ -20,6 +20,7 @@ var rootCmd = &cobra.Command{
 
 func initAll() {
 	initVersion()
+	initRun()
 }
 
 func Execute() {

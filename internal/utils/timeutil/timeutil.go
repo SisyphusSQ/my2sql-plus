@@ -56,6 +56,12 @@ func CSTLayoutStringToUnix(cstLayoutString string) (int64, error) {
 	return stamp.Unix(), nil
 }
 
+// UnixTsToCSTLayout 秒为精度的时间戳转cst时间
+// 1579871471 => 2020-01-24 21:11:11
+func UnixTsToCSTLayout(ts int64) string {
+	return time.Unix(ts, 0).Format(TimeLayout)
+}
+
 // GMTLayoutString 格式化时间
 // 返回 "Mon, 02 Jan 2006 15:04:05 GMT" 格式的时间
 func GMTLayoutString() string {

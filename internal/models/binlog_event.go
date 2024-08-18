@@ -1,12 +1,11 @@
 package models
 
 import (
-	"github.com/go-mysql-org/go-mysql/mysql"
-	"github.com/go-mysql-org/go-mysql/replication"
-
 	"github.com/SisyphusSQ/my2sql/internal/config"
 	"github.com/SisyphusSQ/my2sql/internal/log"
 	"github.com/SisyphusSQ/my2sql/internal/vars"
+	"github.com/go-mysql-org/go-mysql/mysql"
+	"github.com/go-mysql-org/go-mysql/replication"
 )
 
 const (
@@ -26,6 +25,29 @@ type BinEventStats struct {
 	RowCnt        uint32
 	QuerySQL      string   // for type = query, insert, update, delete
 	ParsedSqlInfo *SQLInfo // for ddl
+}
+
+type StatsPrint struct {
+	StartTime int64
+	StopTime  int64
+	StartPos  uint32
+	StopPos   uint32
+	Database  string
+	Table     string
+	Inserts   int
+	Updates   int
+	Deletes   int
+}
+
+type TrxInfo struct {
+	StartTime  int64
+	StopTime   int64
+	Binlog     string
+	StartPos   uint32
+	StopPos    uint32
+	RowCnt     int                       // total row count for all statement
+	Duration   int                       // how long the trx lasts
+	Statements map[string]map[string]int // rowCnt for each type statement: insert, update, delete. {db1.tb1:{insert:0, update:2, delete:10}}
 }
 
 type MyBinEvent struct {

@@ -3,31 +3,23 @@ package transformer
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	sql "github.com/dropbox/godropbox/database/sqlbuilder"
 	"github.com/go-mysql-org/go-mysql/mysql"
 
 	"github.com/SisyphusSQ/my2sql/internal/config"
+	"github.com/SisyphusSQ/my2sql/internal/locker"
 	"github.com/SisyphusSQ/my2sql/internal/log"
 	"github.com/SisyphusSQ/my2sql/internal/models"
 	"github.com/SisyphusSQ/my2sql/internal/utils"
 	"github.com/SisyphusSQ/my2sql/internal/utils/binutil"
 	"github.com/SisyphusSQ/my2sql/internal/utils/sqltypes"
+	"github.com/SisyphusSQ/my2sql/internal/utils/timeutil"
 )
-
-type JsonEvent struct {
-	EventType  string         `json:"eventType"`
-	SchemaName string         `json:"schemaName"`
-	TableName  string         `json:"tableName"`
-	Timestamp  uint32         `json:"timestamp"`
-	Position   string         `json:"position"`
-	RowBefore  map[string]any `json:"rowBefore,omitempty"`
-	RowAfter   map[string]any `json:"rowAfter,omitempty"`
-}
 
 type Transformer struct {
 	ctx context.Context
@@ -53,15 +45,22 @@ type Transformer struct {
 
 	ev         *models.MyBinEvent
 	tbColsInfo *models.TblColsInfo
+	trxLock    *locker.TrxLock
 
 	eventChan <-chan *models.MyBinEvent
+
+	sqlChan  chan<- *models.ResultSQL
+	jsonChan chan<- []*models.JsonEvent
 }
 
 func NewTransformer(ctx context.Context,
 	threadNum int,
 	c *config.Config,
 	tbColsInfo *models.TblColsInfo,
-	eventChan chan *models.MyBinEvent) *Transformer {
+	eventChan chan *models.MyBinEvent,
+	sqlChan chan *models.ResultSQL,
+	jsonChan chan []*models.JsonEvent,
+	trxLock *locker.TrxLock) *Transformer {
 	t := &Transformer{
 		ctx:       ctx,
 		threadNum: threadNum,
@@ -74,6 +73,10 @@ func NewTransformer(ctx context.Context,
 
 		tbColsInfo: tbColsInfo,
 		eventChan:  eventChan,
+		sqlChan:    sqlChan,
+		jsonChan:   jsonChan,
+
+		trxLock: trxLock,
 	}
 
 	return t
@@ -126,18 +129,46 @@ func (t *Transformer) generate(ev *models.MyBinEvent) error {
 	// -------------- start to transform --------------
 	t.getFieldsExpr(colCnt)
 	var (
-		sqls       = t.transform2SQL()
-		jsonEvents = t.transform2Json()
+		sqls        = t.transform2SQL()
+		jsonEvents  = t.transform2Json()
+		extractInfo = models.ExtraInfo{
+			Schema:    t.curDB,
+			Table:     t.curTb,
+			Binlog:    t.binlog,
+			StartPos:  t.ev.StartPos,
+			EndPos:    t.ev.MyPos.Pos,
+			Datetime:  timeutil.UnixTsToCSTLayout(int64(t.curTs)),
+			TrxIndex:  t.ev.TrxIndex,
+			TrxStatus: t.ev.TrxStatus,
+		}
 	)
 
+	// set trx index seq
+	for {
+		t.trxLock.Lock()
+		if t.trxLock.EvIdx() == t.ev.EventIdx {
+			t.sqlChan <- &models.ResultSQL{SQLs: sqls, SQLInfo: extractInfo}
+			t.jsonChan <- jsonEvents
+
+			t.trxLock.IncrEvIdx()
+			t.trxLock.Unlock()
+			return nil
+		}
+
+		t.trxLock.Unlock()
+		time.Sleep(1 * time.Microsecond)
+	}
 }
 
-func (t *Transformer) Binlog() string {
-	return t.binlog
+func (t *Transformer) CurPos() string {
+	return t.posStr
 }
 
 func (t *Transformer) Stop() {
+	// t.tbColsInfo is shared with multi transformers, so that close it by outer func
+	// t.tbColsInfo.Stop()
 
+	log.Logger.Info(fmt.Sprintf("exit thread %d to generate redo/rollback sql", t.threadNum))
 }
 
 func (t *Transformer) getFieldsExpr(colCnt int) {
@@ -278,6 +309,7 @@ pri:
 	}
 }
 
+// transform2Json start to transform binlog event to sqls
 func (t *Transformer) transform2SQL() []string {
 	var (
 		sqls    = make([]string, 0)
@@ -299,12 +331,12 @@ func (t *Transformer) transform2SQL() []string {
 	} else if sqlType == "update" {
 		sqls = t.genUpdFromEvent()
 	} else {
-		log.Logger.Warn("unsupported query type %s to generate 2sql|rollback sql, it should one of insert|update|delete. %s\n",
+		log.Logger.Warn("unsupported query type %s to generate 2sql|rollback sql, it should one of insert|update|delete. %s",
 			sqlType, t.posStr)
 		return sqls
 	}
 
-	return sqls, nil
+	return sqls
 }
 
 func (t *Transformer) genInsFromEvent() []string {
@@ -484,14 +516,14 @@ func (t *Transformer) genEqCond(row []any) []sql.BoolExpression {
 	return exps
 }
 
-// transform2Json star to transform event to json
-func (t *Transformer) transform2Json() []string {
+// transform2Json start to transform event to json
+func (t *Transformer) transform2Json() []*models.JsonEvent {
 	var (
 		step       = 1
 		rows       = t.ev.BinEvent.Rows
 		sqlType    = t.ev.SQLType
 		tbInfo     = t.curTbInfo
-		jsonEvents = make([]string, 0)
+		jsonEvents = make([]*models.JsonEvent, 0)
 	)
 
 	if sqlType == "update" {
@@ -499,7 +531,7 @@ func (t *Transformer) transform2Json() []string {
 	}
 
 	for i := 0; i < len(rows); i += step {
-		event := JsonEvent{
+		event := &models.JsonEvent{
 			EventType:  strings.ToUpper(sqlType),
 			SchemaName: tbInfo.Database,
 			TableName:  tbInfo.Table,
@@ -516,12 +548,7 @@ func (t *Transformer) transform2Json() []string {
 			event.RowAfter = t.genRowMap(rows[i+1])
 		}
 
-		data, err := json.Marshal(event)
-		if err != nil {
-			log.Logger.Error("canalEvent can not be marshaled, value: %v", event)
-			continue
-		}
-		jsonEvents = append(jsonEvents, string(data))
+		jsonEvents = append(jsonEvents, event)
 	}
 	return jsonEvents
 }
