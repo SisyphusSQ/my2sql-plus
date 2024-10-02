@@ -182,8 +182,8 @@ func (c *Config) ParseConfig(dbs, tbs, ignoreDBs, ignoreTBs, sqlTypes, startTime
 		}
 	}
 
+	c.FilterSQLMap = make(map[string]struct{})
 	if sqlTypes != "" {
-		c.FilterSQLMap = make(map[string]struct{})
 		c.FilterSQL = utils.CommaListToArray(sqlTypes)
 		for _, t := range c.FilterSQL {
 			utils.CheckItemInSlice(vars.GOptsValidFilterSQL, t, "invalid sqltypes", true)
@@ -192,6 +192,9 @@ func (c *Config) ParseConfig(dbs, tbs, ignoreDBs, ignoreTBs, sqlTypes, startTime
 		c.FilterSQLLen = len(c.FilterSQL)
 	} else {
 		c.FilterSQLLen = 0
+		for _, t := range vars.GOptsValidFilterSQL {
+			c.FilterSQLMap[t] = struct{}{}
+		}
 	}
 
 	c.GTimeLocation, err = time.LoadLocation(c.BinlogTimeLocation)

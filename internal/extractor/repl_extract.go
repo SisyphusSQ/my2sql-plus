@@ -50,21 +50,20 @@ func NewReplExtract(wg *sync.WaitGroup, ctx context.Context,
 	}
 
 	r := &ReplExtract{
-		wg:        wg,
-		ctx:       ctx,
-		config:    c,
-		binlog:    c.StartFile,
-		syncer:    replication.NewBinlogSyncer(replCfg),
-		eventChan: eventChan,
-		statsChan: statsChan,
-		startPos:  mysql.Position{Name: c.StartFile, Pos: uint32(c.StartPos)},
+		wg:           wg,
+		ctx:          ctx,
+		config:       c,
+		binlog:       c.StartFile,
+		syncer:       replication.NewBinlogSyncer(replCfg),
+		eventChan:    eventChan,
+		statsChan:    statsChan,
+		eventTimeout: 100000 * time.Second,
+		startPos:     mysql.Position{Name: c.StartFile, Pos: uint32(c.StartPos)},
 	}
 	return r
 }
 
 func (r *ReplExtract) Start() error {
-	defer r.Stop()
-
 	var (
 		err error
 		ev  = new(replication.BinlogEvent)
@@ -77,6 +76,7 @@ func (r *ReplExtract) Start() error {
 		rowCnt, tbMapPos  uint32
 	)
 
+	r.wg.Add(1)
 	log.Logger.Info("starting to get binlog from mysql")
 	replStreamer, err := r.syncer.StartSync(r.startPos)
 	if err != nil {
@@ -160,7 +160,7 @@ func (r *ReplExtract) Start() error {
 		}
 
 		select {
-		case <-ctx.Done():
+		case <-r.ctx.Done():
 			return nil
 		default:
 			// do nothing
@@ -176,6 +176,9 @@ func (r *ReplExtract) Stop() {
 	if r.syncer != nil {
 		r.syncer.Close()
 	}
+
+	close(r.eventChan)
+	close(r.statsChan)
 
 	r.wg.Done()
 	log.Logger.Info("finished getting binlog from mysql")

@@ -52,7 +52,7 @@ type Transformer struct {
 
 	eventChan <-chan *models.MyBinEvent
 
-	sqlChan chan<- *models.ResultSQL
+	sqlChan chan *models.ResultSQL
 }
 
 func NewTransformer(wg *sync.WaitGroup, ctx context.Context,
@@ -84,6 +84,7 @@ func NewTransformer(wg *sync.WaitGroup, ctx context.Context,
 }
 
 func (t *Transformer) Start() error {
+	t.wg.Add(1)
 	log.Logger.Info("start thread %d to generate redo/rollback sql", t.threadNum)
 	var err error
 

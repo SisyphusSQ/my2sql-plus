@@ -54,7 +54,7 @@ func NewFileExtract(wg *sync.WaitGroup, ctx context.Context,
 }
 
 func (f *FileExtract) Start() error {
-	defer f.Stop()
+	f.wg.Add(1)
 	log.Logger.Info("starting to parse binlog from local files")
 
 	var pos int64
@@ -93,6 +93,13 @@ func (f *FileExtract) Start() error {
 			pos = 4
 		} else {
 			return errors.New(fmt.Sprintf("this should not happen: return value of MyParseOneBinlog is %d", state))
+		}
+
+		select {
+		case <-f.ctx.Done():
+			return nil
+		default:
+			// do nothing
 		}
 	}
 }

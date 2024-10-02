@@ -122,7 +122,7 @@ func (t *TblColsInfo) GetTableCols(schema, table string) {
 	}
 
 	i := 0
-	fieldInfos := make([]*FieldInfo, len(cols))
+	fieldInfos := make([]*FieldInfo, 0, len(cols))
 	for rows.Next() {
 		scanArgs := make([]any, len(cols))
 		for i := range scanArgs {

@@ -75,6 +75,7 @@ func NewStatsLoader(wg *sync.WaitGroup, ctx context.Context,
 }
 
 func (s *StatsLoader) Start() error {
+	s.wg.Add(1)
 	log.Logger.Info("start thread to analyze statistics from binlog")
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()

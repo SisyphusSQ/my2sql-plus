@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"sync"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -47,11 +48,13 @@ var runCmd = &cobra.Command{
 		c.ParseConfig(dbs, tbs, ignoreDBs, ignoreTBs, sqlTypes, startTime, stopTime, doNotAddPrefixDB)
 
 		var (
+			totalRoutines   int
+			finishRoutines  int
+			isClosed        bool
+			trCnt           atomic.Int64
 			extractWg       sync.WaitGroup
 			transWg         sync.WaitGroup
 			loadWg          sync.WaitGroup
-			totalRoutines   int
-			finishRoutines  int
 			tbColsInfo, err = models.NewTblColsInfo(c)
 			errChan         = make(chan error)
 			lock            = locker.NewTrxLock()
@@ -66,24 +69,23 @@ var runCmd = &cobra.Command{
 			cancel()
 			return err
 		}
+		defer tbColsInfo.Stop()
 
 		go func() {
-			loadWg.Add(1)
 			totalRoutines++
 			statsLoader, err := core.NewLoader("stats", &loadWg, ctx, c, "", sqlChan, statChan)
 			if err != nil {
 				log.Logger.Fatal("create %s loader failed, err: %v", "stats", err)
 			}
-			defer statsLoader.Stop()
 
 			errChan <- statsLoader.Start()
+			statsLoader.Stop()
 		}()
 
 		if c.WorkType != "stats" {
 			for _, t := range []string{c.WorkType, "json"} {
-				loadWg.Add(1)
 				totalRoutines++
-				load, err := core.NewLoader("stats", &loadWg, ctx, c, t, sqlChan, statChan)
+				load, err := core.NewLoader("binlog", &loadWg, ctx, c, t, sqlChan, statChan)
 				if err != nil {
 					log.Logger.Error("create %s loader failed, err: %v", t, err)
 					cancel()
@@ -97,18 +99,17 @@ var runCmd = &cobra.Command{
 			}
 
 			for i := range c.Threads {
-				transWg.Add(1)
 				totalRoutines++
 				transform := core.NewTransformer("default", &transWg, ctx, i, c, tbColsInfo, eventChan, sqlChan, lock)
 
 				go func() {
 					errChan <- transform.Start()
 					transform.Stop()
+					trCnt.Add(1)
 				}()
 			}
 		}
 
-		extractWg.Add(1)
 		totalRoutines++
 		extract := core.NewExtractor(c.Mode, &extractWg, ctx, c, eventChan, statChan)
 		go func() {
@@ -130,6 +131,7 @@ var runCmd = &cobra.Command{
 					case syscall.SIGINT, syscall.SIGTERM:
 						log.Logger.Debug("Terminating process, will finish cpu pprof before exit(if specified)...")
 						StopCpuProfile(f)
+						cancel()
 						return errors.New("finished by ctrl-C/kill/kill -15")
 					default:
 						// do nothing
@@ -144,25 +146,29 @@ var runCmd = &cobra.Command{
 				finishRoutines++
 				if err != nil {
 					log.Logger.Error("my2sql-plus got err, err: %v", err)
-					cancel()
-					goto exit
+				}
+
+				if trCnt.Load() == int64(c.Threads) {
+					if !isClosed {
+						close(sqlChan)
+					}
+					isClosed = true
 				}
 
 				if totalRoutines == finishRoutines {
-					cancel() // actually, no need to cancel
 					goto exit
 				}
 			}
 		}
 
 	exit:
+		cancel()
 		extractWg.Wait()
 		transWg.Wait()
 		loadWg.Wait()
 
-		close(eventChan)
-		close(sqlChan)
-		close(statChan)
+		// do memory profiling before exit
+		MemProfile()
 		return err
 	},
 }

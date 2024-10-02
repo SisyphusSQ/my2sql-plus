@@ -70,6 +70,7 @@ func NewSQLLoader(wg *sync.WaitGroup, ctx context.Context, c *config.Config,
 
 func (s *SQLLoader) Start() error {
 	var err error
+	s.wg.Add(1)
 	log.Logger.Info("start thread to write redo/rollback sql into file")
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
