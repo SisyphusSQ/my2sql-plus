@@ -151,8 +151,8 @@ var runCmd = &cobra.Command{
 				if trCnt.Load() == int64(c.Threads) {
 					if !isClosed {
 						close(sqlChan)
+						isClosed = true
 					}
-					isClosed = true
 				}
 
 				if totalRoutines == finishRoutines {

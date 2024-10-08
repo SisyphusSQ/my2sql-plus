@@ -57,7 +57,7 @@ func NewReplExtract(wg *sync.WaitGroup, ctx context.Context,
 		syncer:       replication.NewBinlogSyncer(replCfg),
 		eventChan:    eventChan,
 		statsChan:    statsChan,
-		eventTimeout: 100000 * time.Second,
+		eventTimeout: 60 * time.Second,
 		startPos:     mysql.Position{Name: c.StartFile, Pos: uint32(c.StartPos)},
 	}
 	return r

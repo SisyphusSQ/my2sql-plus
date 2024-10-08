@@ -354,7 +354,5 @@ func compareBinlogPos(sBinFile string, sPos uint, eBinFile string, ePos uint) in
 	sp := mysql.Position{Name: sBinFile, Pos: uint32(sPos)}
 	ep := mysql.Position{Name: eBinFile, Pos: uint32(ePos)}
 
-	result := sp.Compare(ep)
-
-	return result
+	return sp.Compare(ep)
 }
