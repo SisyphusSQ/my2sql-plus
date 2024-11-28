@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dropbox/godropbox/encoding2"
-	"github.com/dropbox/godropbox/errors"
+	"github.com/SisyphusSQ/godropbox/encoding2"
+	"github.com/SisyphusSQ/godropbox/errors"
 )
 
 var (

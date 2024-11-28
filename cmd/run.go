@@ -100,12 +100,12 @@ var runCmd = &cobra.Command{
 
 			for i := range c.Threads {
 				totalRoutines++
-				transform := core.NewTransformer("default", &transWg, ctx, i, c, tbColsInfo, eventChan, sqlChan, lock)
+				transform := core.NewTransformer("default", &transWg, ctx, i, &trCnt, c, tbColsInfo, eventChan, sqlChan, lock)
 
 				go func() {
 					errChan <- transform.Start()
 					transform.Stop()
-					trCnt.Add(1)
+					//trCnt.Add(1)
 				}()
 			}
 		}
@@ -129,10 +129,10 @@ var runCmd = &cobra.Command{
 					sig := <-ch
 					switch sig {
 					case syscall.SIGINT, syscall.SIGTERM:
+						cancel()
 						log.Logger.Debug("Terminating process, will finish cpu pprof before exit(if specified)...")
 						StopCpuProfile(f)
-						cancel()
-						return errors.New("finished by ctrl-C/kill/kill -15")
+						return vars.ManualKill
 					default:
 						// do nothing
 					}
@@ -143,11 +143,16 @@ var runCmd = &cobra.Command{
 		for {
 			select {
 			case err := <-errChan:
-				finishRoutines++
 				if err != nil {
+					cancel()
 					log.Logger.Error("my2sql-plus got err, err: %v", err)
+
+					if errors.Is(err, vars.ManualKill) {
+						continue
+					}
 				}
 
+				finishRoutines++
 				if trCnt.Load() == int64(c.Threads) {
 					if !isClosed {
 						close(sqlChan)

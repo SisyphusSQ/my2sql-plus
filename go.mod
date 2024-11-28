@@ -3,7 +3,7 @@ module github.com/SisyphusSQ/my2sql
 go 1.22
 
 require (
-	github.com/dropbox/godropbox v0.0.0-20230623171840-436d2007a9fd
+	github.com/SisyphusSQ/godropbox v0.0.0-20241128074027-10ebb8b630b1
 	github.com/fatih/color v1.17.0
 	github.com/go-mysql-org/go-mysql v1.8.0
 	github.com/go-sql-driver/mysql v1.8.1

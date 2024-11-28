@@ -8,9 +8,10 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	sql "github.com/dropbox/godropbox/database/sqlbuilder"
+	sql "github.com/SisyphusSQ/godropbox/database/sqlbuilder"
 	"github.com/go-mysql-org/go-mysql/mysql"
 
 	"github.com/SisyphusSQ/my2sql/internal/config"
@@ -30,6 +31,7 @@ type Transformer struct {
 	binlog    string
 	posStr    string
 	threadNum int
+	trCnt     *atomic.Int64
 
 	isUkFirst  bool
 	isRollBack bool
@@ -57,6 +59,7 @@ type Transformer struct {
 
 func NewTransformer(wg *sync.WaitGroup, ctx context.Context,
 	threadNum int,
+	trCnt *atomic.Int64,
 	c *config.Config,
 	tbColsInfo *models.TblColsInfo,
 	eventChan chan *models.MyBinEvent,
@@ -66,6 +69,7 @@ func NewTransformer(wg *sync.WaitGroup, ctx context.Context,
 		wg:        wg,
 		ctx:       ctx,
 		threadNum: threadNum,
+		trCnt:     trCnt,
 
 		isUkFirst:  c.UseUniqueKeyFirst,
 		isRollBack: c.WorkType == "rollback",
@@ -91,9 +95,11 @@ func (t *Transformer) Start() error {
 	for {
 		select {
 		case <-t.ctx.Done():
+			t.trCnt.Add(1)
 			return nil
 		case ev, ok := <-t.eventChan:
 			if !ok {
+				t.trCnt.Add(1)
 				return nil
 			}
 

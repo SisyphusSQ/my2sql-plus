@@ -3,6 +3,8 @@ package models
 import (
 	"database/sql"
 	"fmt"
+	"sync"
+
 	"github.com/SisyphusSQ/my2sql/internal/config"
 	"github.com/SisyphusSQ/my2sql/internal/log"
 	"github.com/SisyphusSQ/my2sql/internal/utils"
@@ -51,6 +53,7 @@ type table struct {
 }
 
 type TblColsInfo struct {
+	sync.Mutex
 	client *sql.DB
 
 	// {db.tb:TblInfo}}
@@ -76,6 +79,8 @@ func NewTblColsInfo(c *config.Config) (*TblColsInfo, error) {
 func (t *TblColsInfo) GetTableInfo(schema, table string) *TblInfo {
 	absTable := utils.GetAbsTableName(schema, table)
 
+	t.Lock()
+	defer t.Unlock()
 	tbInfo, ok := t.tableInfos[absTable]
 	if !ok {
 		t.GetTableCols(schema, table)

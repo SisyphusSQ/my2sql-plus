@@ -22,7 +22,8 @@ go.work
 
 .idea
 
-*/test/*
+*/test/
 
 bin/*
 
+test/

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/SisyphusSQ/my2sql/internal/config"
 	"github.com/SisyphusSQ/my2sql/internal/extractor"
@@ -49,12 +50,12 @@ func NewExtractor(extractType string, wg *sync.WaitGroup, ctx context.Context, c
 	}
 }
 
-func NewTransformer(transType string, wg *sync.WaitGroup, ctx context.Context, threadNum int,
+func NewTransformer(transType string, wg *sync.WaitGroup, ctx context.Context, threadNum int, trCnt *atomic.Int64,
 	c *config.Config, tbColsInfo *models.TblColsInfo, eventChan chan *models.MyBinEvent, sqlChan chan *models.ResultSQL,
 	trxLock *locker.TrxLock) Transformer {
 	switch transType {
 	case "default":
-		return transformer.NewTransformer(wg, ctx, threadNum, c, tbColsInfo, eventChan, sqlChan, trxLock)
+		return transformer.NewTransformer(wg, ctx, threadNum, trCnt, c, tbColsInfo, eventChan, sqlChan, trxLock)
 	default:
 		panic("unknown transformer type: " + transType)
 	}
