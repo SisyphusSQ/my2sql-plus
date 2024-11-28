@@ -85,7 +85,7 @@ func (r *ReplExtract) Start() error {
 	}
 
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), r.eventTimeout)
+		ctx, cancel := context.WithTimeout(r.ctx, r.eventTimeout)
 		ev, err = replStreamer.GetEvent(ctx)
 		cancel()
 
