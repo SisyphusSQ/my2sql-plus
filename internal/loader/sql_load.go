@@ -72,7 +72,7 @@ func (s *SQLLoader) Start() error {
 	var err error
 	s.wg.Add(1)
 	log.Logger.Info("start thread to write redo/rollback sql into file")
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
 	for {

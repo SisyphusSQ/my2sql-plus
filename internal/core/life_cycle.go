@@ -52,17 +52,17 @@ func NewExtractor(extractType string, wg *sync.WaitGroup, ctx context.Context, c
 
 func NewTransformer(transType string, wg *sync.WaitGroup, ctx context.Context, threadNum int, trCnt *atomic.Int64,
 	c *config.Config, tbColsInfo *models.TblColsInfo, eventChan chan *models.MyBinEvent, sqlChan chan *models.ResultSQL,
-	trxLock *locker.TrxLock) Transformer {
+	jsonChan chan *models.ResultSQL, trxLock *locker.TrxLock) Transformer {
 	switch transType {
 	case "default":
-		return transformer.NewTransformer(wg, ctx, threadNum, trCnt, c, tbColsInfo, eventChan, sqlChan, trxLock)
+		return transformer.NewTransformer(wg, ctx, threadNum, trCnt, c, tbColsInfo, eventChan, sqlChan, jsonChan, trxLock)
 	default:
 		panic("unknown transformer type: " + transType)
 	}
 }
 
 func NewLoader(loaderType string, wg *sync.WaitGroup, ctx context.Context, c *config.Config,
-	typeName string, sqlChan chan *models.ResultSQL, statsChan chan *models.BinEventStats) (Loader, error) {
+	sqlChan chan *models.ResultSQL, jsonChan chan *models.ResultSQL, statsChan chan *models.BinEventStats) (Loader, error) {
 	switch loaderType {
 	case "stats":
 		l, err := loader.NewStatsLoader(wg, ctx, c, statsChan)
@@ -70,9 +70,9 @@ func NewLoader(loaderType string, wg *sync.WaitGroup, ctx context.Context, c *co
 			return nil, err
 		}
 		return l, nil
-	case "binlog":
-		return loader.NewSQLLoader(wg, ctx, c, typeName, sqlChan), nil
+	case "json":
+		return loader.NewSQLLoader(wg, ctx, c, loaderType, jsonChan), nil
 	default:
-		panic("unknown loader type: " + loaderType)
+		return loader.NewSQLLoader(wg, ctx, c, loaderType, sqlChan), nil
 	}
 }

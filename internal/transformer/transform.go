@@ -54,7 +54,8 @@ type Transformer struct {
 
 	eventChan <-chan *models.MyBinEvent
 
-	sqlChan chan *models.ResultSQL
+	sqlChan  chan *models.ResultSQL
+	jsonChan chan *models.ResultSQL
 }
 
 func NewTransformer(wg *sync.WaitGroup, ctx context.Context,
@@ -64,6 +65,7 @@ func NewTransformer(wg *sync.WaitGroup, ctx context.Context,
 	tbColsInfo *models.TblColsInfo,
 	eventChan chan *models.MyBinEvent,
 	sqlChan chan *models.ResultSQL,
+	jsonChan chan *models.ResultSQL,
 	trxLock *locker.TrxLock) *Transformer {
 	t := &Transformer{
 		wg:        wg,
@@ -80,6 +82,7 @@ func NewTransformer(wg *sync.WaitGroup, ctx context.Context,
 		tbColsInfo: tbColsInfo,
 		eventChan:  eventChan,
 		sqlChan:    sqlChan,
+		jsonChan:   jsonChan,
 
 		trxLock: trxLock,
 	}
@@ -155,7 +158,9 @@ func (t *Transformer) generate(ev *models.MyBinEvent) error {
 	for {
 		t.trxLock.Lock()
 		if t.trxLock.EvIdx() == t.ev.EventIdx {
-			t.sqlChan <- &models.ResultSQL{SQLs: sqls, Jsons: jsonEvents, SQLInfo: extractInfo}
+			res := &models.ResultSQL{SQLs: sqls, Jsons: jsonEvents, SQLInfo: extractInfo}
+			t.sqlChan <- res
+			t.jsonChan <- res
 
 			t.trxLock.IncrEvIdx()
 			t.trxLock.Unlock()

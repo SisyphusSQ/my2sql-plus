@@ -62,7 +62,8 @@ var runCmd = &cobra.Command{
 			chanCap         = c.Threads * 2
 			eventChan       = make(chan *models.MyBinEvent, chanCap)
 			statChan        = make(chan *models.BinEventStats, chanCap)
-			sqlChan         = make(chan *models.ResultSQL, chanCap)
+			sqlChan         = make(chan *models.ResultSQL)
+			jsonChan        = make(chan *models.ResultSQL)
 		)
 
 		if err != nil {
@@ -73,7 +74,7 @@ var runCmd = &cobra.Command{
 
 		go func() {
 			totalRoutines++
-			statsLoader, err := core.NewLoader("stats", &loadWg, ctx, c, "", sqlChan, statChan)
+			statsLoader, err := core.NewLoader("stats", &loadWg, ctx, c, sqlChan, jsonChan, statChan)
 			if err != nil {
 				log.Logger.Fatal("create %s loader failed, err: %v", "stats", err)
 			}
@@ -85,7 +86,7 @@ var runCmd = &cobra.Command{
 		if c.WorkType != "stats" {
 			for _, t := range []string{c.WorkType, "json"} {
 				totalRoutines++
-				load, err := core.NewLoader("binlog", &loadWg, ctx, c, t, sqlChan, statChan)
+				load, err := core.NewLoader(t, &loadWg, ctx, c, sqlChan, jsonChan, statChan)
 				if err != nil {
 					log.Logger.Error("create %s loader failed, err: %v", t, err)
 					cancel()
@@ -100,7 +101,8 @@ var runCmd = &cobra.Command{
 
 			for i := range c.Threads {
 				totalRoutines++
-				transform := core.NewTransformer("default", &transWg, ctx, i, &trCnt, c, tbColsInfo, eventChan, sqlChan, lock)
+				transform := core.NewTransformer("default", &transWg, ctx, i, &trCnt, c, tbColsInfo, eventChan,
+					sqlChan, jsonChan, lock)
 
 				go func() {
 					errChan <- transform.Start()
@@ -156,6 +158,7 @@ var runCmd = &cobra.Command{
 				if trCnt.Load() == int64(c.Threads) {
 					if !isClosed {
 						close(sqlChan)
+						close(jsonChan)
 						isClosed = true
 					}
 				}

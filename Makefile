@@ -14,7 +14,7 @@ all: clean build deploy
 build:
 	GOARCH=amd64 GOOS=linux go build -ldflags="${BUILD_FLAGS}" -o bin/${BINARY_NAME} my2sql.go
 
-test:
+darwin:
 	go build -ldflags="${BUILD_FLAGS}" -o bin/${BINARY_NAME} my2sql.go
 
 test_version:
