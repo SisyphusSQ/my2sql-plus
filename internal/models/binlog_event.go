@@ -146,8 +146,8 @@ BinEventCheck:
 		db := string(wrEvent.Table.Schema)
 		tb := string(wrEvent.Table.Table)
 
-		isAssign := c.IsAssign && !(c.IsAssign && c.DBTBExist(db, tb, "assign")) // check if assign db or tb
-		isIgnore := c.IsIgnore && c.DBTBExist(db, tb, "ignore")                  // check if ignore db or tb
+		isAssign := c.IsAssign && !c.DBTBExist(db, tb, "assign")
+		isIgnore := c.IsIgnore && c.DBTBExist(db, tb, "ignore")
 		if isAssign || isIgnore {
 			return vars.ReContinue
 		}

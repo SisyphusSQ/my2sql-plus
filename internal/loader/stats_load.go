@@ -45,7 +45,7 @@ func NewStatsLoader(wg *sync.WaitGroup, ctx context.Context,
 		wg:  wg,
 		ctx: ctx,
 
-		interval:    time.NewTicker(time.Duration(c.PrintInterval)),
+		interval:    time.NewTicker(time.Duration(c.PrintInterval) * time.Second),
 		bigTrxRows:  c.BigTrxRowLimit,
 		longTrxSecs: c.LongTrxSeconds,
 
@@ -91,6 +91,7 @@ func (s *StatsLoader) Start() error {
 			s.writeStats()
 		case st, ok := <-s.statsChan:
 			if !ok {
+				s.writeStats()
 				return nil
 			}
 
@@ -121,6 +122,7 @@ func (s *StatsLoader) handleStats(st *models.BinEventStats) {
 			if s.trx.StartTime > 0 {
 				s.trx.StopPos = st.StopPos
 				s.trx.StopTime = int64(st.Timestamp)
+				s.trx.Duration = int(s.trx.StopTime - s.trx.StartTime)
 
 				if s.trx.RowCnt >= s.bigTrxRows || s.trx.Duration >= s.longTrxSecs {
 					s.writeTrx()

@@ -159,7 +159,7 @@ func (s *SQLLoader) handleSQLPerTable(sql *models.ResultSQL) error {
 			return err
 		}
 
-		s.writerMap[fileName] = bufio.NewWriter(s.file)
+		s.writerMap[fileName] = bufio.NewWriter(s.fileMap[fileName])
 	}
 
 	return s.writeSQL2File(s.writerMap[fileName], sql)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -457,28 +458,41 @@ func (t *Transformer) genUpdFromEvent() []string {
 
 func (t *Transformer) genUpdSetPart(update sql.UpdateStatement, ra []any, rb []any) sql.UpdateStatement {
 	for colIdx, colValue := range ra {
-		ifUpdate := false
-
-		if !t.isFullCols {
-			if slices.Contains([]string{"blob", "json", "geometry"}, t.curTbInfo.Columns[colIdx].FieldName) &&
-				!strings.Contains(strings.ToLower(t.curTbInfo.Columns[colIdx].FieldType), "text") {
-				a, aOk := colValue.([]byte)
-				b, bOk := rb[colIdx].([]byte)
-				if aOk && bOk {
-					ifUpdate = bytes.Compare(a, b) == 0
-				}
-			} else {
-				ifUpdate = colValue == rb[colIdx]
-			}
-		} else {
-			ifUpdate = true
+		shouldUpdate := t.isFullCols
+		if !shouldUpdate {
+			shouldUpdate = !t.valuesEqual(colIdx, colValue, rb[colIdx])
 		}
 
-		if ifUpdate {
+		if shouldUpdate {
 			update.Set(t.curColsDef[colIdx], sql.Literal(colValue))
 		}
 	}
 	return update
+}
+
+// valuesEqual 比较 update 前后镜像在列维度上是否相等，避免 []byte 直接比较触发 panic。
+func (t *Transformer) valuesEqual(colIdx int, left any, right any) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+
+	if t.isBinaryLikeColumn(colIdx) {
+		leftBytes, leftOK := left.([]byte)
+		rightBytes, rightOK := right.([]byte)
+		if leftOK && rightOK {
+			return bytes.Equal(leftBytes, rightBytes)
+		}
+	}
+
+	return reflect.DeepEqual(left, right)
+}
+
+func (t *Transformer) isBinaryLikeColumn(colIdx int) bool {
+	fieldType := strings.ToLower(t.curTbInfo.Columns[colIdx].FieldType)
+	return (strings.Contains(fieldType, "blob") ||
+		strings.Contains(fieldType, "json") ||
+		strings.Contains(fieldType, "geometry")) &&
+		!strings.Contains(fieldType, "text")
 }
 
 func (t *Transformer) genDelFromEvent() []string {
