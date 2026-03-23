@@ -75,6 +75,14 @@ type Config struct {
 
 	OutputDir string
 
+	FlashbackBinlog     bool
+	FlashbackBinlogBase string
+	FlashbackBinlogPath string
+
+	Summary     bool
+	SummaryFile string
+	SummaryPath string
+
 	FullColumns    bool
 	InsertRows     int
 	KeepTrx        bool
@@ -122,6 +130,34 @@ func (c *Config) ParseConfig(dbs, tbs, ignoreDBs, ignoreTBs, sqlTypes, startTime
 		}
 	} else {
 		c.OutputDir, _ = os.Getwd()
+	}
+
+	if c.SummaryFile != "" {
+		c.Summary = true
+	}
+
+	if c.WorkType != "rollback" {
+		if c.FlashbackBinlog || c.FlashbackBinlogBase != "" {
+			log.Logger.Fatal("flashback binlog output only works with -work-type=rollback")
+		}
+		if c.Summary {
+			log.Logger.Fatal("summary output only works with -work-type=rollback")
+		}
+	}
+
+	if c.FlashbackBinlogBase != "" && !c.FlashbackBinlog {
+		log.Logger.Fatal("--flashback-binlog-base requires --flashback-binlog")
+	}
+
+	if c.FlashbackBinlog {
+		if c.FlashbackBinlogBase == "" {
+			c.FlashbackBinlogBase = vars.DefaultFlashbackBinlogBase
+		}
+		c.FlashbackBinlogPath = resolveOutputPath(c.OutputDir, c.FlashbackBinlogBase)
+	}
+
+	if c.SummaryFile != "" {
+		c.SummaryPath = resolveOutputPath(c.OutputDir, c.SummaryFile)
 	}
 
 	if !doNotAddPrefixDB {
@@ -343,4 +379,14 @@ func compareBinlogPos(sBinFile string, sPos uint, eBinFile string, ePos uint) in
 	ep := mysql.Position{Name: eBinFile, Pos: uint32(ePos)}
 
 	return sp.Compare(ep)
+}
+
+func resolveOutputPath(baseDir string, target string) string {
+	if target == "" {
+		return ""
+	}
+	if filepath.IsAbs(target) {
+		return target
+	}
+	return filepath.Join(baseDir, target)
 }

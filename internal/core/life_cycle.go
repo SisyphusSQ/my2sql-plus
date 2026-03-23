@@ -39,12 +39,13 @@ type Loader interface {
 
 func NewExtractor(extractType string, wg *sync.WaitGroup, ctx context.Context, c *config.Config,
 	eventChan chan *models.MyBinEvent,
-	statChan chan *models.BinEventStats) Extractor {
+	statChan chan *models.BinEventStats,
+	flashbackChan chan *models.FlashbackEvent) Extractor {
 	switch extractType {
 	case "file":
-		return extractor.NewFileExtract(wg, ctx, c, eventChan, statChan)
+		return extractor.NewFileExtract(wg, ctx, c, eventChan, statChan, flashbackChan)
 	case "repl":
-		return extractor.NewReplExtract(wg, ctx, c, eventChan, statChan)
+		return extractor.NewReplExtract(wg, ctx, c, eventChan, statChan, flashbackChan)
 	default:
 		panic("unknown extract type: " + extractType)
 	}
@@ -62,7 +63,8 @@ func NewTransformer(transType string, wg *sync.WaitGroup, ctx context.Context, t
 }
 
 func NewLoader(loaderType string, wg *sync.WaitGroup, ctx context.Context, c *config.Config,
-	sqlChan chan *models.ResultSQL, jsonChan chan *models.ResultSQL, statsChan chan *models.BinEventStats) (Loader, error) {
+	sqlChan chan *models.ResultSQL, jsonChan chan *models.ResultSQL, statsChan chan *models.BinEventStats,
+	flashbackChan chan *models.FlashbackEvent) (Loader, error) {
 	switch loaderType {
 	case "stats":
 		l, err := loader.NewStatsLoader(wg, ctx, c, statsChan)
@@ -72,6 +74,8 @@ func NewLoader(loaderType string, wg *sync.WaitGroup, ctx context.Context, c *co
 		return l, nil
 	case "json":
 		return loader.NewSQLLoader(wg, ctx, c, loaderType, jsonChan), nil
+	case "flashback":
+		return loader.NewFlashbackLoader(wg, ctx, c, flashbackChan), nil
 	default:
 		return loader.NewSQLLoader(wg, ctx, c, loaderType, sqlChan), nil
 	}

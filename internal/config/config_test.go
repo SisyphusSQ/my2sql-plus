@@ -94,6 +94,38 @@ func TestParseConfig_AssignAndIgnoreFlags(t *testing.T) {
 			t.Fatalf("expected BinlogDir to equal file directory, got %s", cfg.BinlogDir)
 		}
 	})
+
+	t.Run("rollback options resolve output paths", func(t *testing.T) {
+		cfg := newTestConfig(t)
+		cfg.WorkType = "rollback"
+		cfg.FlashbackBinlog = true
+		cfg.FlashbackBinlogBase = "rollback_out"
+		cfg.SummaryFile = "summary.txt"
+
+		cfg.ParseConfig("", "", "", "", "", "", "", false)
+
+		if cfg.FlashbackBinlogPath != filepath.Join(cfg.OutputDir, "rollback_out") {
+			t.Fatalf("expected flashback path to resolve against output dir, got %s", cfg.FlashbackBinlogPath)
+		}
+		if !cfg.Summary {
+			t.Fatalf("expected summary to be enabled when summary file is set")
+		}
+		if cfg.SummaryPath != filepath.Join(cfg.OutputDir, "summary.txt") {
+			t.Fatalf("expected summary path to resolve against output dir, got %s", cfg.SummaryPath)
+		}
+	})
+
+	t.Run("flashback output uses default base when enabled", func(t *testing.T) {
+		cfg := newTestConfig(t)
+		cfg.WorkType = "rollback"
+		cfg.FlashbackBinlog = true
+
+		cfg.ParseConfig("", "", "", "", "", "", "", false)
+
+		if cfg.FlashbackBinlogPath != filepath.Join(cfg.OutputDir, vars.DefaultFlashbackBinlogBase) {
+			t.Fatalf("expected default flashback base, got %s", cfg.FlashbackBinlogPath)
+		}
+	})
 }
 
 func newTestConfig(t *testing.T) *Config {

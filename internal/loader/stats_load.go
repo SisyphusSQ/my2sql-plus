@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -30,12 +31,25 @@ type StatsLoader struct {
 
 	trxFile     *os.File
 	statsFile   *os.File
+	summaryFile *os.File
 	trxWriter   *bufio.Writer
 	statsWriter *bufio.Writer
+	summaryW    *bufio.Writer
 
-	trx       *models.TrxInfo
-	stats     map[string]*models.StatsPrint
-	statsChan <-chan *models.BinEventStats
+	trx            *models.TrxInfo
+	stats          map[string]*models.StatsPrint
+	summaryEnabled bool
+	summaryPath    string
+	summary        map[string]*rollbackSummaryEntry
+	statsChan      <-chan *models.BinEventStats
+}
+
+type rollbackSummaryEntry struct {
+	Database        string
+	Table           string
+	AffectedRows    uint64
+	OriginalSQLType string
+	RollbackSQLType string
 }
 
 func NewStatsLoader(wg *sync.WaitGroup, ctx context.Context,
@@ -52,6 +66,10 @@ func NewStatsLoader(wg *sync.WaitGroup, ctx context.Context,
 		trx:       new(models.TrxInfo),
 		stats:     make(map[string]*models.StatsPrint),
 		statsChan: statsChan,
+
+		summaryEnabled: c.Summary,
+		summaryPath:    c.SummaryPath,
+		summary:        make(map[string]*rollbackSummaryEntry),
 	}
 
 	// -------------- new file --------------
@@ -70,6 +88,14 @@ func NewStatsLoader(wg *sync.WaitGroup, ctx context.Context,
 	}
 	s.trxWriter = bufio.NewWriter(s.trxFile)
 	_, _ = s.trxFile.WriteString(vars.GetTrxHeader(utils.ConvertToSliceAny(vars.TrxHeaderColumn)))
+
+	if s.summaryEnabled && s.summaryPath != "" {
+		if s.summaryFile, err = os.OpenFile(s.summaryPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644); err != nil {
+			log.Logger.Error("failed to open summary file, err: %v", err)
+			return nil, err
+		}
+		s.summaryW = bufio.NewWriter(s.summaryFile)
+	}
 
 	return s, nil
 }
@@ -92,6 +118,7 @@ func (s *StatsLoader) Start() error {
 		case st, ok := <-s.statsChan:
 			if !ok {
 				s.writeStats()
+				s.writeSummary()
 				return nil
 			}
 
@@ -156,6 +183,7 @@ func (s *StatsLoader) handleStats(st *models.BinEventStats) {
 
 	// collect stats
 	s.collectStats(absTable, st)
+	s.collectSummary(st)
 }
 
 func (s *StatsLoader) collectStats(t string, st *models.BinEventStats) {
@@ -195,6 +223,71 @@ func (s *StatsLoader) writeStats() {
 	s.stats = make(map[string]*models.StatsPrint)
 }
 
+func (s *StatsLoader) collectSummary(st *models.BinEventStats) {
+	if !s.summaryEnabled {
+		return
+	}
+	if !utils.EqualsAny(st.QueryType, "insert", "update", "delete") {
+		return
+	}
+
+	rollbackType := rollbackSQLType(st.QueryType)
+	key := fmt.Sprintf("%s.%s.%s.%s", st.Database, st.Table, st.QueryType, rollbackType)
+	if _, ok := s.summary[key]; !ok {
+		s.summary[key] = &rollbackSummaryEntry{
+			Database:        st.Database,
+			Table:           st.Table,
+			OriginalSQLType: st.QueryType,
+			RollbackSQLType: rollbackType,
+		}
+	}
+	s.summary[key].AffectedRows += uint64(st.RowCnt)
+}
+
+func (s *StatsLoader) writeSummary() {
+	if !s.summaryEnabled {
+		return
+	}
+
+	entries := make([]*rollbackSummaryEntry, 0, len(s.summary))
+	for _, entry := range s.summary {
+		entries = append(entries, entry)
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].Database != entries[j].Database {
+			return entries[i].Database < entries[j].Database
+		}
+		if entries[i].Table != entries[j].Table {
+			return entries[i].Table < entries[j].Table
+		}
+		if entries[i].OriginalSQLType != entries[j].OriginalSQLType {
+			return entries[i].OriginalSQLType < entries[j].OriginalSQLType
+		}
+		return entries[i].RollbackSQLType < entries[j].RollbackSQLType
+	})
+
+	var builder strings.Builder
+	builder.WriteString(vars.GetSummaryHeader(utils.ConvertToSliceAny(vars.SummaryHeaderColumn)))
+	for _, entry := range entries {
+		builder.WriteString(fmt.Sprintf("%-15s %-20s %-14d %-18s %-18s\n",
+			entry.Database,
+			entry.Table,
+			entry.AffectedRows,
+			entry.OriginalSQLType,
+			entry.RollbackSQLType,
+		))
+	}
+
+	output := builder.String()
+	fmt.Print(output)
+
+	if s.summaryW != nil {
+		_, _ = s.summaryW.WriteString(output)
+		_ = s.summaryW.Flush()
+	}
+}
+
 func (s *StatsLoader) writeTrx() {
 	ss := make([]string, 0, len(s.trx.Statements))
 	for absTable, info := range s.trx.Statements {
@@ -219,10 +312,27 @@ func (s *StatsLoader) Stop() {
 	// ---------- close file ----------
 	_ = s.trxWriter.Flush()
 	_ = s.statsWriter.Flush()
+	if s.summaryW != nil {
+		_ = s.summaryW.Flush()
+	}
 
 	_ = s.trxFile.Close()
 	_ = s.statsFile.Close()
+	if s.summaryFile != nil {
+		_ = s.summaryFile.Close()
+	}
 
 	s.wg.Done()
 	log.Logger.Info("exit thread to analyze statistics from binlog")
+}
+
+func rollbackSQLType(sqlType string) string {
+	switch sqlType {
+	case "insert":
+		return "delete"
+	case "delete":
+		return "insert"
+	default:
+		return "update"
+	}
 }
