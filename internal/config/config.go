@@ -149,7 +149,7 @@ func (c *Config) ParseConfig(dbs, tbs, ignoreDBs, ignoreTBs, sqlTypes, startTime
 	} else {
 		if len(tbArr) > 0 {
 			c.IsAssign = true
-			c.AssignDB = true
+			c.AssignTB = true
 			for _, tb := range tbArr {
 				c.AssignMap[fmt.Sprintf(filterTBTemp, tb)] = struct{}{}
 			}
@@ -247,18 +247,6 @@ func (c *Config) ParseConfig(dbs, tbs, ignoreDBs, ignoreTBs, sqlTypes, startTime
 	}
 
 	if c.Mode == "file" {
-		if c.StartFile == "" {
-			log.Logger.Fatal("missing binlog file.  -start-file must be specify when -mode=file ")
-		}
-		c.GivenBinlogFile = c.StartFile
-		if !utils.IsFile(c.GivenBinlogFile) {
-			log.Logger.Fatal("%s doesn't exists nor a file", c.GivenBinlogFile)
-		} else {
-			c.BinlogDir = filepath.Dir(c.GivenBinlogFile)
-		}
-	}
-
-	if c.Mode == "file" {
 		if c.LocalBinFile == "" {
 			log.Logger.Fatal("missing binlog file.  -local-binlog-file must be specify when -mode=file ")
 		}
@@ -267,6 +255,10 @@ func (c *Config) ParseConfig(dbs, tbs, ignoreDBs, ignoreTBs, sqlTypes, startTime
 			log.Logger.Fatal("%s doesn't exists nor a file\n", c.GivenBinlogFile)
 		} else {
 			c.BinlogDir = filepath.Dir(c.GivenBinlogFile)
+		}
+
+		if c.StartFile == "" {
+			c.StartFile = filepath.Base(c.LocalBinFile)
 		}
 	}
 
@@ -330,10 +322,6 @@ func (c *Config) DBTBExist(db, tb, fType string) bool {
 
 		return false
 	} else {
-		if !(c.IgnoreDB && c.IgnoreTB) {
-			return false
-		}
-
 		if c.IgnoreDB && c.IgnoreTB {
 			_, ok := c.IgnoreMap[fmt.Sprintf(filterDTTemp, db, tb)]
 			return ok

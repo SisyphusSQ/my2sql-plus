@@ -23,6 +23,11 @@ import (
 	"github.com/SisyphusSQ/my2sql/internal/vars"
 )
 
+type routineResult struct {
+	name string
+	err  error
+}
+
 var (
 	c = config.New()
 
@@ -50,13 +55,17 @@ var runCmd = &cobra.Command{
 		var (
 			totalRoutines   int
 			finishRoutines  int
-			isClosed        bool
+			transformDone   int
+			eventChanClosed bool
+			statChanClosed  bool
+			sqlChanClosed   bool
+			runErr          error
 			trCnt           atomic.Int64
 			extractWg       sync.WaitGroup
 			transWg         sync.WaitGroup
 			loadWg          sync.WaitGroup
 			tbColsInfo, err = models.NewTblColsInfo(c)
-			errChan         = make(chan error)
+			errChan         = make(chan routineResult, c.Threads+4)
 			lock            = locker.NewTrxLock()
 			ctx, cancel     = context.WithCancel(context.Background())
 			chanCap         = c.Threads * 2
@@ -72,50 +81,51 @@ var runCmd = &cobra.Command{
 		}
 		defer tbColsInfo.Stop()
 
+		totalRoutines++
 		go func() {
-			totalRoutines++
 			statsLoader, err := core.NewLoader("stats", &loadWg, ctx, c, sqlChan, jsonChan, statChan)
 			if err != nil {
 				log.Logger.Fatal("create %s loader failed, err: %v", "stats", err)
 			}
 
-			errChan <- statsLoader.Start()
+			errChan <- routineResult{name: "stats-loader", err: statsLoader.Start()}
 			statsLoader.Stop()
 		}()
 
 		if c.WorkType != "stats" {
 			for _, t := range []string{c.WorkType, "json"} {
 				totalRoutines++
-				load, err := core.NewLoader(t, &loadWg, ctx, c, sqlChan, jsonChan, statChan)
+				loadType := t
+				load, err := core.NewLoader(loadType, &loadWg, ctx, c, sqlChan, jsonChan, statChan)
 				if err != nil {
-					log.Logger.Error("create %s loader failed, err: %v", t, err)
+					log.Logger.Error("create %s loader failed, err: %v", loadType, err)
 					cancel()
 					return err
 				}
 
-				go func() {
-					errChan <- load.Start()
+				go func(name string, load core.Loader) {
+					errChan <- routineResult{name: name, err: load.Start()}
 					load.Stop()
-				}()
+				}(fmt.Sprintf("loader-%s", loadType), load)
 			}
 
 			for i := range c.Threads {
 				totalRoutines++
-				transform := core.NewTransformer("default", &transWg, ctx, i, &trCnt, c, tbColsInfo, eventChan,
+				threadNum := i
+				transform := core.NewTransformer("default", &transWg, ctx, threadNum, &trCnt, c, tbColsInfo, eventChan,
 					sqlChan, jsonChan, lock)
 
-				go func() {
-					errChan <- transform.Start()
+				go func(name string, transform core.Transformer) {
+					errChan <- routineResult{name: name, err: transform.Start()}
 					transform.Stop()
-					//trCnt.Add(1)
-				}()
+				}(fmt.Sprintf("transformer-%d", threadNum), transform)
 			}
 		}
 
 		totalRoutines++
 		extract := core.NewExtractor(c.Mode, &extractWg, ctx, c, eventChan, statChan)
 		go func() {
-			errChan <- extract.Start()
+			errChan <- routineResult{name: "extractor", err: extract.Start()}
 			extract.Stop()
 		}()
 
@@ -126,50 +136,54 @@ var runCmd = &cobra.Command{
 		ch := make(chan os.Signal, 5)
 		signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 		go func() {
-			errChan <- func() error {
-				for {
-					sig := <-ch
-					switch sig {
-					case syscall.SIGINT, syscall.SIGTERM:
-						cancel()
-						log.Logger.Debug("Terminating process, will finish cpu pprof before exit(if specified)...")
-						StopCpuProfile(f)
-						return vars.ManualKill
-					default:
-						// do nothing
-					}
+			for {
+				sig := <-ch
+				switch sig {
+				case syscall.SIGINT, syscall.SIGTERM:
+					cancel()
+					log.Logger.Debug("Terminating process, will finish cpu pprof before exit(if specified)...")
+					StopCpuProfile(f)
+					return
+				default:
+					// do nothing
 				}
-			}()
+			}
 		}()
 
-		for {
-			select {
-			case err := <-errChan:
-				if err != nil {
-					cancel()
-					log.Logger.Error("my2sql-plus got err, err: %v", err)
-
-					if errors.Is(err, vars.ManualKill) {
-						continue
+		for finishRoutines < totalRoutines {
+			res := <-errChan
+			if res.err != nil {
+				cancel()
+				if !errors.Is(res.err, context.Canceled) && !errors.Is(res.err, vars.ManualKill) {
+					if runErr == nil {
+						runErr = res.err
 					}
+					log.Logger.Error("my2sql-plus got err from %s, err: %v", res.name, res.err)
 				}
+			}
 
-				finishRoutines++
-				if trCnt.Load() == int64(c.Threads) {
-					if !isClosed {
-						close(sqlChan)
-						close(jsonChan)
-						isClosed = true
-					}
+			finishRoutines++
+			switch {
+			case res.name == "extractor":
+				if c.WorkType != "stats" && !eventChanClosed {
+					close(eventChan)
+					eventChanClosed = true
 				}
-
-				if totalRoutines == finishRoutines {
-					goto exit
+				if !statChanClosed {
+					close(statChan)
+					statChanClosed = true
+				}
+			case len(res.name) >= len("transformer-") &&
+				res.name[:len("transformer-")] == "transformer-":
+				transformDone++
+				if c.WorkType != "stats" && transformDone == c.Threads && !sqlChanClosed {
+					close(sqlChan)
+					close(jsonChan)
+					sqlChanClosed = true
 				}
 			}
 		}
 
-	exit:
 		cancel()
 		extractWg.Wait()
 		transWg.Wait()
@@ -177,7 +191,7 @@ var runCmd = &cobra.Command{
 
 		// do memory profiling before exit
 		MemProfile()
-		return err
+		return runErr
 	},
 }
 
@@ -185,10 +199,10 @@ func StartCpuProfile() *os.File {
 	if cpuprofile != "" {
 		f, err := os.Create(cpuprofile)
 		if err != nil {
-			log.Logger.Fatal("could not create CPU profile: ", err)
+			log.Logger.Fatal("could not create CPU profile: %v", err)
 		}
 		if err = pprof.StartCPUProfile(f); err != nil {
-			log.Logger.Fatal("could not start CPU profile: ", err)
+			log.Logger.Fatal("could not start CPU profile: %v", err)
 		}
 		log.Logger.Info("cpu pprof start ...")
 		return f
@@ -209,12 +223,12 @@ func MemProfile() {
 	if memprofile != "" {
 		f, err := os.Create(memprofile)
 		if err != nil {
-			log.Logger.Fatal("could not create memory profile: ", err)
+			log.Logger.Fatal("could not create memory profile: %v", err)
 		}
 		defer f.Close()
 		runtime.GC() // get up-to-date statistics
 		if err = pprof.WriteHeapProfile(f); err != nil {
-			log.Logger.Fatal("could not write memory profile: ", err)
+			log.Logger.Fatal("could not write memory profile: %v", err)
 		}
 		log.Logger.Info("mem pprof done [file=%s]!", memprofile)
 	}

@@ -155,6 +155,8 @@ func (t *TblColsInfo) GetTableCols(schema, table string) {
 		Table:    table,
 		Columns:  fieldInfos,
 	}
+
+	t.GetTableKeys(schema, table)
 }
 
 func (t *TblColsInfo) GetTableKeys(schema, table string) {
@@ -207,13 +209,14 @@ func (t *TblColsInfo) GetTableKeys(schema, table string) {
 		}
 
 		keyName := utils.ColumnValue(scanArgs, cols, "Key_name")
+		columnName := utils.ColumnValue(scanArgs, cols, "Column_name")
 		if utils.IsPrimary(keyName) {
-			primary = append(primary, utils.ColumnValue(scanArgs, cols, "Key_name"))
+			primary = append(primary, columnName)
 		} else {
 			if _, ok := unique[keyName]; !ok {
 				unique[keyName] = make(KeyInfo, 0)
 			}
-			unique[keyName] = append(unique[keyName], utils.ColumnValue(scanArgs, cols, "Key_name"))
+			unique[keyName] = append(unique[keyName], columnName)
 		}
 	}
 
@@ -223,6 +226,7 @@ func (t *TblColsInfo) GetTableKeys(schema, table string) {
 	}
 
 	tableInfo.PrimaryKey = primary
+	tableInfo.UniqueKeys = make([]KeyInfo, 0, len(unique))
 	for _, u := range unique {
 		tableInfo.UniqueKeys = append(tableInfo.UniqueKeys, u)
 	}
