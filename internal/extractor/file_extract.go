@@ -70,7 +70,7 @@ func (f *FileExtract) Start() error {
 		}
 
 		// todo now pos in uncorrected
-		log.Logger.Info(fmt.Sprintf("start to parse %s %d", f.binlog, pos))
+		log.Logger.Info("start to parse %s %d", f.binlog, pos)
 		state, err := f.parsePerFile(f.binlog, pos)
 		if err != nil {
 			return err

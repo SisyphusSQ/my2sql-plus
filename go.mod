@@ -7,9 +7,10 @@ require (
 	github.com/fatih/color v1.17.0
 	github.com/go-mysql-org/go-mysql v1.8.0
 	github.com/go-sql-driver/mysql v1.8.1
-	github.com/realcp1018/tinylog v1.0.4
 	github.com/spf13/cast v1.6.0
 	github.com/spf13/cobra v1.8.1
+	go.uber.org/zap v1.26.0
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
 require (
@@ -30,9 +31,7 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	go.uber.org/zap v1.26.0 // indirect
 	golang.org/x/exp v0.0.0-20231006140011-7918f672742d // indirect
 	golang.org/x/sys v0.22.0 // indirect
 	golang.org/x/text v0.13.0 // indirect
-	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 )

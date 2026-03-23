@@ -181,7 +181,7 @@ func (t *Transformer) Stop() {
 	// t.tbColsInfo.Stop()
 
 	t.wg.Done()
-	log.Logger.Info(fmt.Sprintf("exit thread %d to generate redo/rollback sql", t.threadNum))
+	log.Logger.Info("exit thread %d to generate redo/rollback sql", t.threadNum)
 }
 
 func (t *Transformer) getFieldsExpr(colCnt int) {
@@ -394,8 +394,8 @@ func (t *Transformer) genInsFromEvent() []string {
 		exprs := t.genInsExpress(row, t.isIgrPri && ifIgrPri)
 		s, err := sql.NewTable(t.curTb, colsDef...).Insert(colsDef...).Add(exprs...).String(schema)
 		if err != nil {
-			log.Logger.Fatal(fmt.Sprintf("Fail to generate %s sql for %s %s \n\terror: %v\n\trows data:%v",
-				sqlType, t.curAbsTb, t.posStr, err, row))
+			log.Logger.Fatal("Fail to generate %s sql for %s %s \n\terror: %v\n\trows data:%v",
+				sqlType, t.curAbsTb, t.posStr, err, row)
 		}
 		sqls = append(sqls, s)
 	}
