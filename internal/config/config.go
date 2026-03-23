@@ -199,13 +199,13 @@ func (c *Config) ParseConfig(dbs, tbs, ignoreDBs, ignoreTBs, sqlTypes, startTime
 
 	c.GTimeLocation, err = time.LoadLocation(c.BinlogTimeLocation)
 	if err != nil {
-		log.Logger.Fatal("invalid time location[%s], err: %v"+c.BinlogTimeLocation, err)
+		log.Logger.Fatal("invalid time location[%s], err: %v", c.BinlogTimeLocation, err)
 	}
 
 	if startTime != "" {
 		t, err := time.ParseInLocation(timeutil.TimeLayout, startTime, c.GTimeLocation)
 		if err != nil {
-			log.Logger.Fatal("invalid start datetime -start-datetime: %s " + startTime)
+			log.Logger.Fatal("invalid start datetime -start-datetime: %s", startTime)
 		}
 		c.StartDatetime = uint32(t.Unix())
 		c.IfSetStartDateTime = true
@@ -216,7 +216,7 @@ func (c *Config) ParseConfig(dbs, tbs, ignoreDBs, ignoreTBs, sqlTypes, startTime
 	if stopTime != "" {
 		t, err := time.ParseInLocation(timeutil.TimeLayout, stopTime, c.GTimeLocation)
 		if err != nil {
-			log.Logger.Fatal("invalid stop datetime -stop-datetime: %s " + stopTime)
+			log.Logger.Fatal("invalid stop datetime -stop-datetime: %s", stopTime)
 		}
 		c.StopDatetime = uint32(t.Unix())
 		c.IfSetStopDateTime = true
