@@ -130,3 +130,82 @@ func TestStatsLoader_HandleStatsCalculatesDuration(t *testing.T) {
 		t.Fatalf("expected trx duration to be written as 2 seconds, got %s", trxOut.String())
 	}
 }
+
+func TestStatsLoader_WriteSummaryOutputsScreenAndFile(t *testing.T) {
+	summaryFile, err := os.CreateTemp(t.TempDir(), "summary-*.txt")
+	if err != nil {
+		t.Fatalf("unexpected temp file error: %v", err)
+	}
+	defer summaryFile.Close()
+
+	loader := &StatsLoader{
+		interval:       time.NewTicker(time.Hour),
+		trxWriter:      bufio.NewWriter(io.Discard),
+		statsWriter:    bufio.NewWriter(io.Discard),
+		trx:            new(models.TrxInfo),
+		stats:          make(map[string]*models.StatsPrint),
+		summaryEnabled: true,
+		summaryPath:    summaryFile.Name(),
+		summary:        make(map[string]*rollbackSummaryEntry),
+		summaryFile:    summaryFile,
+		summaryW:       bufio.NewWriter(summaryFile),
+	}
+	defer loader.interval.Stop()
+
+	loader.handleStats(&models.BinEventStats{
+		Timestamp: 10,
+		Binlog:    "mysql-bin.000001",
+		StartPos:  4,
+		StopPos:   40,
+		Database:  "shop",
+		Table:     "orders",
+		QueryType: "insert",
+		RowCnt:    3,
+	})
+	loader.handleStats(&models.BinEventStats{
+		Timestamp: 11,
+		Binlog:    "mysql-bin.000001",
+		StartPos:  40,
+		StopPos:   80,
+		Database:  "shop",
+		Table:     "orders",
+		QueryType: "update",
+		RowCnt:    2,
+	})
+
+	stdout := os.Stdout
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("unexpected pipe error: %v", err)
+	}
+	os.Stdout = writer
+
+	loader.writeSummary()
+
+	_ = writer.Close()
+	os.Stdout = stdout
+
+	screenOutput, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("unexpected stdout read error: %v", err)
+	}
+	fileOutput, err := os.ReadFile(summaryFile.Name())
+	if err != nil {
+		t.Fatalf("unexpected summary file read error: %v", err)
+	}
+
+	for _, output := range []string{string(screenOutput), string(fileOutput)} {
+		if !strings.Contains(output, "database") || !strings.Contains(output, "rollback_sql_type") {
+			t.Fatalf("expected summary header in output, got %s", output)
+		}
+		if !strings.Contains(output, "shop") || !strings.Contains(output, "orders") {
+			t.Fatalf("expected table identity in output, got %s", output)
+		}
+		if !strings.Contains(output, "insert") || !strings.Contains(output, "delete") {
+			t.Fatalf("expected insert->delete mapping in output, got %s", output)
+		}
+		if !strings.Contains(output, "update") {
+			t.Fatalf("expected update mapping in output, got %s", output)
+		}
+	}
+}

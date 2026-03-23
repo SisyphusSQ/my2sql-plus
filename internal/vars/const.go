@@ -49,7 +49,13 @@ var (
 		"start_pos", "stop_pos", "inserts", "updates", "deletes", "database", "table"}
 	TrxHeaderColumn = []string{"binlog", "start_time", "stop_time", "start_pos", "stop_pos",
 		"rows", "duration", "tables"}
-	DDLHeaderColumn = []string{"binlog", "time", "start_pos", "stop_pos", "sql"}
+	DDLHeaderColumn     = []string{"binlog", "time", "start_pos", "stop_pos", "sql"}
+	SummaryHeaderColumn = []string{"database", "table", "affected_rows", "original_sql_type", "rollback_sql_type"}
+)
+
+const (
+	DefaultFlashbackBinlogBase = "binlog_output_base"
+	FlashbackBinlogSuffix      = ".flashback"
 )
 
 const (
@@ -65,6 +71,10 @@ func GetTrxHeader(headers []any) string {
 func GetStatsHeader(headers []any) string {
 	//[binlog, start_time, stop_time, start_pos, stop_pos, inserts, updates, deletes, database, table]
 	return fmt.Sprintf("%-17s %-19s %-19s %-10s %-10s %-8s %-8s %-8s %-15s %-20s\n", headers...)
+}
+
+func GetSummaryHeader(headers []any) string {
+	return fmt.Sprintf("%-15s %-20s %-14s %-18s %-18s\n", headers...)
 }
 
 func GetMinValueOfRange(opt string) int {

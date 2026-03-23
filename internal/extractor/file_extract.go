@@ -1,14 +1,16 @@
 package extractor
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"github.com/go-mysql-org/go-mysql/mysql"
-	"github.com/go-mysql-org/go-mysql/replication"
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/go-mysql-org/go-mysql/mysql"
+	"github.com/go-mysql-org/go-mysql/replication"
 
 	"github.com/SisyphusSQ/my2sql/internal/config"
 	"github.com/SisyphusSQ/my2sql/internal/log"
@@ -29,22 +31,25 @@ type FileExtract struct {
 	config      *config.Config
 	parser      *replication.BinlogParser
 
-	eventChan chan<- *models.MyBinEvent
-	statChan  chan<- *models.BinEventStats
+	eventChan     chan<- *models.MyBinEvent
+	statChan      chan<- *models.BinEventStats
+	flashbackChan chan<- *models.FlashbackEvent
 }
 
 func NewFileExtract(wg *sync.WaitGroup, ctx context.Context,
 	c *config.Config,
 	eventChan chan *models.MyBinEvent,
-	statChan chan *models.BinEventStats) *FileExtract {
+	statChan chan *models.BinEventStats,
+	flashbackChan chan *models.FlashbackEvent) *FileExtract {
 	f := &FileExtract{
-		wg:        wg,
-		ctx:       ctx,
-		config:    c,
-		binlog:    c.StartFile,
-		parser:    replication.NewBinlogParser(),
-		eventChan: eventChan,
-		statChan:  statChan,
+		wg:            wg,
+		ctx:           ctx,
+		config:        c,
+		binlog:        c.StartFile,
+		parser:        replication.NewBinlogParser(),
+		eventChan:     eventChan,
+		statChan:      statChan,
+		flashbackChan: flashbackChan,
 		startPos: mysql.Position{
 			Name: c.StopFile,
 			Pos:  uint32(c.StartPos),
@@ -111,12 +116,30 @@ func (f *FileExtract) parsePerFile(fileName string, pos int64) (int, error) {
 		sqlLower, sqlType string
 		rowCnt, tbMapPos  uint32
 		trxStatus         int
+		tableMapRawData   []byte
 	)
 
 	fn := func(ev *replication.BinlogEvent) error {
+		var rawData []byte
+		if f.flashbackChan != nil {
+			rawData = bytes.Clone(ev.RawData)
+		}
+
+		if ev.Header.EventType == replication.FORMAT_DESCRIPTION_EVENT && f.flashbackChan != nil {
+			formatDesc, _ := ev.Event.(*replication.FormatDescriptionEvent)
+			f.flashbackChan <- &models.FlashbackEvent{
+				EventType:         ev.Header.EventType,
+				RawData:           rawData,
+				FormatDescription: formatDesc,
+			}
+		}
+
 		if ev.Header.EventType == replication.TABLE_MAP_EVENT {
 			// avoid mysqlbing mask the row event as unknown table row event
 			tbMapPos = ev.Header.LogPos - ev.Header.EventSize
+			if f.flashbackChan != nil {
+				tableMapRawData = rawData
+			}
 		}
 
 		// we don't need raw data
@@ -158,6 +181,19 @@ func (f *FileExtract) parsePerFile(fileName string, pos int64) (int, error) {
 			oneEvent.TrxIndex = f.trxIdx
 			oneEvent.TrxStatus = trxStatus
 			f.eventChan <- oneEvent
+
+			if f.flashbackChan != nil {
+				rowsEvent, _ := ev.Event.(*replication.RowsEvent)
+				f.flashbackChan <- &models.FlashbackEvent{
+					EventType:       ev.Header.EventType,
+					TrxIndex:        f.trxIdx,
+					Timestamp:       ev.Header.Timestamp,
+					SQLType:         sqlType,
+					RawData:         rawData,
+					TableMapRawData: bytes.Clone(tableMapRawData),
+					RowsEvent:       rowsEvent,
+				}
+			}
 		}
 
 		// output analysis result whatever the WorkType is
@@ -172,6 +208,15 @@ func (f *FileExtract) parsePerFile(fileName string, pos int64) (int, error) {
 				QuerySQL:  text,
 				RowCnt:    rowCnt,
 				QueryType: sqlType,
+			}
+		}
+
+		if f.flashbackChan != nil && sqlType == "query" && strings.EqualFold(text, "commit") {
+			f.flashbackChan <- &models.FlashbackEvent{
+				EventType: replication.XID_EVENT,
+				TrxIndex:  f.trxIdx,
+				Timestamp: ev.Header.Timestamp,
+				RawData:   rawData,
 			}
 		}
 

@@ -59,13 +59,14 @@ var runCmd = &cobra.Command{
 			eventChanClosed bool
 			statChanClosed  bool
 			sqlChanClosed   bool
+			flashbackClosed bool
 			runErr          error
 			trCnt           atomic.Int64
 			extractWg       sync.WaitGroup
 			transWg         sync.WaitGroup
 			loadWg          sync.WaitGroup
 			tbColsInfo, err = models.NewTblColsInfo(c)
-			errChan         = make(chan routineResult, c.Threads+4)
+			errChan         = make(chan routineResult, c.Threads+6)
 			lock            = locker.NewTrxLock()
 			ctx, cancel     = context.WithCancel(context.Background())
 			chanCap         = c.Threads * 2
@@ -73,7 +74,12 @@ var runCmd = &cobra.Command{
 			statChan        = make(chan *models.BinEventStats, chanCap)
 			sqlChan         = make(chan *models.ResultSQL)
 			jsonChan        = make(chan *models.ResultSQL)
+			flashbackChan   chan *models.FlashbackEvent
 		)
+
+		if c.FlashbackBinlog {
+			flashbackChan = make(chan *models.FlashbackEvent, chanCap)
+		}
 
 		if err != nil {
 			cancel()
@@ -83,7 +89,7 @@ var runCmd = &cobra.Command{
 
 		totalRoutines++
 		go func() {
-			statsLoader, err := core.NewLoader("stats", &loadWg, ctx, c, sqlChan, jsonChan, statChan)
+			statsLoader, err := core.NewLoader("stats", &loadWg, ctx, c, sqlChan, jsonChan, statChan, flashbackChan)
 			if err != nil {
 				log.Logger.Fatal("create %s loader failed, err: %v", "stats", err)
 			}
@@ -96,7 +102,7 @@ var runCmd = &cobra.Command{
 			for _, t := range []string{c.WorkType, "json"} {
 				totalRoutines++
 				loadType := t
-				load, err := core.NewLoader(loadType, &loadWg, ctx, c, sqlChan, jsonChan, statChan)
+				load, err := core.NewLoader(loadType, &loadWg, ctx, c, sqlChan, jsonChan, statChan, flashbackChan)
 				if err != nil {
 					log.Logger.Error("create %s loader failed, err: %v", loadType, err)
 					cancel()
@@ -122,8 +128,23 @@ var runCmd = &cobra.Command{
 			}
 		}
 
+		if c.FlashbackBinlog {
+			totalRoutines++
+			flashbackLoader, err := core.NewLoader("flashback", &loadWg, ctx, c, sqlChan, jsonChan, statChan, flashbackChan)
+			if err != nil {
+				log.Logger.Error("create %s loader failed, err: %v", "flashback", err)
+				cancel()
+				return err
+			}
+
+			go func() {
+				errChan <- routineResult{name: "loader-flashback", err: flashbackLoader.Start()}
+				flashbackLoader.Stop()
+			}()
+		}
+
 		totalRoutines++
-		extract := core.NewExtractor(c.Mode, &extractWg, ctx, c, eventChan, statChan)
+		extract := core.NewExtractor(c.Mode, &extractWg, ctx, c, eventChan, statChan, flashbackChan)
 		go func() {
 			errChan <- routineResult{name: "extractor", err: extract.Start()}
 			extract.Stop()
@@ -172,6 +193,10 @@ var runCmd = &cobra.Command{
 				if !statChanClosed {
 					close(statChan)
 					statChanClosed = true
+				}
+				if c.FlashbackBinlog && !flashbackClosed {
+					close(flashbackChan)
+					flashbackClosed = true
 				}
 			case len(res.name) >= len("transformer-") &&
 				res.name[:len("transformer-")] == "transformer-":
@@ -267,6 +292,10 @@ func initRun() {
 
 	runCmd.Flags().BoolVar(&c.OutputToScreen, "output-toScreen", false, "Just output to screen,do not write to file")
 	runCmd.Flags().BoolVar(&c.PrintExtraInfo, "add-extraInfo", false, "Works with -work-type=2sql|rollback. Print database/table/datetime/binlog_position...info on the line before sql, default false")
+	runCmd.Flags().BoolVar(&c.FlashbackBinlog, "flashback-binlog", false, "Works with -work-type=rollback. Generate reverse binlog in binary format, default false")
+	runCmd.Flags().StringVar(&c.FlashbackBinlogBase, "flashback-binlog-base", "", "Works with --flashback-binlog. Output file name base/prefix for reverse binlog. Relative paths are resolved against -output-dir")
+	runCmd.Flags().BoolVar(&c.Summary, "summary", false, "Works with -work-type=rollback. Print rollback summary overview after parsing, default false")
+	runCmd.Flags().StringVar(&c.SummaryFile, "summary-file", "", "Works with --summary. Write rollback summary to file, and implicitly enables --summary. Relative paths are resolved against -output-dir")
 
 	runCmd.Flags().BoolVar(&c.FullColumns, "full-columns", false, "For update sql, include unchanged columns. for update and delete, use all columns to build where condition.\t\ndefault false, this is, use changed columns to build set part, use primary/unique key to build where condition")
 	runCmd.Flags().BoolVar(&doNotAddPrefixDB, "do-not-add-prefixDb", false, "Prefix table name witch database name in sql,ex: insert into db1.tb1 (x1, x1) values (y1, y1). ")

@@ -1,6 +1,7 @@
 package extractor
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -27,14 +28,16 @@ type ReplExtract struct {
 	config       *config.Config
 	syncer       *replication.BinlogSyncer
 
-	eventChan chan<- *models.MyBinEvent
-	statsChan chan<- *models.BinEventStats
+	eventChan     chan<- *models.MyBinEvent
+	statsChan     chan<- *models.BinEventStats
+	flashbackChan chan<- *models.FlashbackEvent
 }
 
 func NewReplExtract(wg *sync.WaitGroup, ctx context.Context,
 	c *config.Config,
 	eventChan chan *models.MyBinEvent,
-	statsChan chan *models.BinEventStats) *ReplExtract {
+	statsChan chan *models.BinEventStats,
+	flashbackChan chan *models.FlashbackEvent) *ReplExtract {
 	replCfg := replication.BinlogSyncerConfig{
 		ServerID:                uint32(c.ServerId),
 		Flavor:                  c.MySQLType,
@@ -50,15 +53,16 @@ func NewReplExtract(wg *sync.WaitGroup, ctx context.Context,
 	}
 
 	r := &ReplExtract{
-		wg:           wg,
-		ctx:          ctx,
-		config:       c,
-		binlog:       c.StartFile,
-		syncer:       replication.NewBinlogSyncer(replCfg),
-		eventChan:    eventChan,
-		statsChan:    statsChan,
-		eventTimeout: 60 * time.Second,
-		startPos:     mysql.Position{Name: c.StartFile, Pos: uint32(c.StartPos)},
+		wg:            wg,
+		ctx:           ctx,
+		config:        c,
+		binlog:        c.StartFile,
+		syncer:        replication.NewBinlogSyncer(replCfg),
+		eventChan:     eventChan,
+		statsChan:     statsChan,
+		flashbackChan: flashbackChan,
+		eventTimeout:  60 * time.Second,
+		startPos:      mysql.Position{Name: c.StartFile, Pos: uint32(c.StartPos)},
 	}
 	return r
 }
@@ -74,6 +78,7 @@ func (r *ReplExtract) Start() error {
 		db, tb, text      string
 		sqlLower, sqlType string
 		rowCnt, tbMapPos  uint32
+		tableMapRawData   []byte
 	)
 
 	r.wg.Add(1)
@@ -100,9 +105,26 @@ func (r *ReplExtract) Start() error {
 			return err
 		}
 
+		var rawData []byte
+		if r.flashbackChan != nil {
+			rawData = bytes.Clone(ev.RawData)
+		}
+
+		if ev.Header.EventType == replication.FORMAT_DESCRIPTION_EVENT && r.flashbackChan != nil {
+			formatDesc, _ := ev.Event.(*replication.FormatDescriptionEvent)
+			r.flashbackChan <- &models.FlashbackEvent{
+				EventType:         ev.Header.EventType,
+				RawData:           rawData,
+				FormatDescription: formatDesc,
+			}
+		}
+
 		if ev.Header.EventType == replication.TABLE_MAP_EVENT {
 			// avoid mysqlbing mask the row event as unknown table row event
 			tbMapPos = ev.Header.LogPos - ev.Header.EventSize
+			if r.flashbackChan != nil {
+				tableMapRawData = rawData
+			}
 		}
 		// we don't need raw data
 		ev.RawData = []byte{}
@@ -142,6 +164,19 @@ func (r *ReplExtract) Start() error {
 			oneEvent.TrxIndex = trxIdx
 			oneEvent.TrxStatus = trxStatus
 			r.eventChan <- oneEvent
+
+			if r.flashbackChan != nil {
+				rowsEvent, _ := ev.Event.(*replication.RowsEvent)
+				r.flashbackChan <- &models.FlashbackEvent{
+					EventType:       ev.Header.EventType,
+					TrxIndex:        trxIdx,
+					Timestamp:       ev.Header.Timestamp,
+					SQLType:         sqlType,
+					RawData:         rawData,
+					TableMapRawData: bytes.Clone(tableMapRawData),
+					RowsEvent:       rowsEvent,
+				}
+			}
 		}
 
 		// output analysis result whatever the WorkType is
@@ -156,6 +191,15 @@ func (r *ReplExtract) Start() error {
 				QuerySQL:  text,
 				RowCnt:    rowCnt,
 				QueryType: sqlType,
+			}
+		}
+
+		if r.flashbackChan != nil && sqlType == "query" && strings.EqualFold(text, "commit") {
+			r.flashbackChan <- &models.FlashbackEvent{
+				EventType: replication.XID_EVENT,
+				TrxIndex:  trxIdx,
+				Timestamp: ev.Header.Timestamp,
+				RawData:   rawData,
 			}
 		}
 
@@ -176,9 +220,6 @@ func (r *ReplExtract) Stop() {
 	if r.syncer != nil {
 		r.syncer.Close()
 	}
-
-	close(r.eventChan)
-	close(r.statsChan)
 
 	r.wg.Done()
 	log.Logger.Info("finished getting binlog from mysql")
