@@ -24,7 +24,7 @@
 | 命令 | 作用 |
 | --- | --- |
 | `./bin/my2sql version` | 输出版本、Go 版本、构建时间、提交信息 |
-| `./bin/my2sql run --help` | 查看主运行命令和全部 flag |
+| `./bin/my2sql run --help` | 查看主运行命令、分组 flag 与场景示例 |
 | `./bin/my2sql completion --help` | 查看 shell 自动补全命令 |
 | `./bin/my2sql --help` | 查看根命令帮助 |
 
@@ -62,6 +62,8 @@ make build
 ./bin/my2sql --help
 ./bin/my2sql run --help
 ```
+
+当前 `./bin/my2sql run --help` 会按参数章节输出英文帮助文案，并提供贴近 README 的场景化示例，适合作为终端内快速参考。
 
 `file` 模式生成 rollback SQL：
 
