@@ -1,29 +1,55 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
-# Binaries for programs and plugins
+# Base
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*.log
+logs/
+tmp/
+temp/
+**/output/
+
+# Real local configuration and secrets
+.env
+.env.*
+!.env.example
+settings.yaml
+settings.local.yaml
+config.local.yml
+
+# Harness local auxiliary run surfaces
+.agents/state/*
+!.agents/state/TEMPLATE.md
+.agents/runs/*
+!.agents/runs/TEMPLATE.md
+
+# Real task plans stay local; templates remain commit-safe.
+.agents/plans/*.md
+.agents/plans/**/*.md
+!.agents/plans/TEMPLATE.md
+!.agents/plans/EXAMPLE-implementation.md
+
+# Cursor project rules are commit-safe; other Cursor files stay local by default.
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/*.mdc
+
+# Go
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
-
-# Test binary, built with `go test -c`
 *.test
-
-# Output of the go coverage tool, specifically when used with LiteIDE
 *.out
-
-# Dependency directories (remove the comment below to include it)
+coverage.out
+coverage.html
 # vendor/
-
-# Go workspace file
 go.work
+bin/
+build/
 
-.idea
-
-*/test/
-
-bin/*
-
-test*/
+# Project-local manual test/output directories
+/test/
+/test*/

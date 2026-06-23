@@ -2,6 +2,27 @@
 
 `my2sql-plus` 用于解析 MySQL row binlog，面向 DML 场景生成 SQL、JSON、统计结果，以及可选的反向 binlog 和 rollback summary。
 
+## Harness 控制面
+
+本仓库已接入 repo-local harness 控制面：
+
+- 协作入口：`AGENTS.md`
+- 控制面文档：`docs/harness/`
+- issue 模板：`docs/issues/`
+- 测试 runbook 模板：`docs/test/RUNBOOK_TEMPLATE.md`
+- 计划协议与模板：`.agents/PLANS.md`、`.agents/plans/TEMPLATE.md`、`.agents/plans/EXAMPLE-implementation.md`
+- 默认 workflow skill：`.agents/skills/`
+
+常用验证入口：
+
+```bash
+make harness-verify
+go test ./...
+go build ./...
+```
+
+`.agents/plans/` 下真实任务 plan 默认保持本地，不进入提交；只有 `TEMPLATE.md` 和 `EXAMPLE-implementation.md` 作为模板/示例提交。
+
 ## 项目定位
 
 | 能力 | 说明 | 当前状态 |
