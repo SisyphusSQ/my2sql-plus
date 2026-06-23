@@ -270,8 +270,8 @@ func initRun() {
 
 	runCmd.Flags().StringVar(&c.Host, "host", "127.0.0.1", "MySQL host for binlog access and schema lookup. Default: 127.0.0.1.")
 	runCmd.Flags().UintVar(&c.Port, "port", 3306, "MySQL port for binlog access and schema lookup. Default: 3306.")
-	runCmd.Flags().StringVar(&c.User, "user", "", "MySQL user for binlog access and schema lookup.")
-	runCmd.Flags().StringVar(&c.Passwd, "password", "", "MySQL password for binlog access and schema lookup.")
+	runCmd.Flags().StringVar(&c.User, "user", os.Getenv("MY2SQL_USER"), "MySQL user for binlog access and schema lookup. Falls back to env MY2SQL_USER.")
+	runCmd.Flags().StringVar(&c.Passwd, "password", os.Getenv("MY2SQL_PASSWORD"), "MySQL password for binlog access and schema lookup. Falls back to env MY2SQL_PASSWORD.")
 	runCmd.Flags().UintVar(&c.ServerId, "server-id", 1113306, "Server ID used by repl mode when connecting as a replica. It must be unique across replicas. Default: 1113306.")
 
 	runCmd.Flags().StringVar(&dbs, "databases", "", "Only parse these databases. Use commas to separate multiple names.")
