@@ -50,6 +50,15 @@ var runCmd = &cobra.Command{
 	Short:   runHelpShort,
 	Long:    runHelpDescription,
 	Example: runHelpExamples,
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		if !cmd.Flags().Changed("user") {
+			c.User = os.Getenv("MY2SQL_USER")
+		}
+		if !cmd.Flags().Changed("password") {
+			c.Passwd = os.Getenv("MY2SQL_PASSWORD")
+		}
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c.ParseConfig(dbs, tbs, ignoreDBs, ignoreTBs, sqlTypes, startTime, stopTime, doNotAddPrefixDB)
 
@@ -270,8 +279,8 @@ func initRun() {
 
 	runCmd.Flags().StringVar(&c.Host, "host", "127.0.0.1", "MySQL host for binlog access and schema lookup. Default: 127.0.0.1.")
 	runCmd.Flags().UintVar(&c.Port, "port", 3306, "MySQL port for binlog access and schema lookup. Default: 3306.")
-	runCmd.Flags().StringVar(&c.User, "user", "", "MySQL user for binlog access and schema lookup.")
-	runCmd.Flags().StringVar(&c.Passwd, "password", "", "MySQL password for binlog access and schema lookup.")
+	runCmd.Flags().StringVar(&c.User, "user", "", "MySQL user for binlog access and schema lookup. Falls back to env MY2SQL_USER.")
+	runCmd.Flags().StringVar(&c.Passwd, "password", "", "MySQL password for binlog access and schema lookup. Falls back to env MY2SQL_PASSWORD.")
 	runCmd.Flags().UintVar(&c.ServerId, "server-id", 1113306, "Server ID used by repl mode when connecting as a replica. It must be unique across replicas. Default: 1113306.")
 
 	runCmd.Flags().StringVar(&dbs, "databases", "", "Only parse these databases. Use commas to separate multiple names.")

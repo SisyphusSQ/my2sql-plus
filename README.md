@@ -65,6 +65,24 @@ make build
 
 当前 `./bin/my2sql run --help` 会按参数章节输出英文帮助文案，并提供贴近 README 的场景化示例，适合作为终端内快速参考。
 
+### 凭据与环境变量
+
+`--user` / `--password` 支持从环境变量回落，避免把密码写进命令行（命令行参数会进入 shell history 和 `ps` 进程列表）：
+
+```bash
+export MY2SQL_USER=root
+export MY2SQL_PASSWORD=secret
+./bin/my2sql run --mode=file --work-type=2sql \
+  --host=127.0.0.1 --port=3306 \
+  --local-binlog-file=/path/to/mysql-bin.000001
+```
+
+- 不传 `--user` / `--password` 时，分别回落到 `MY2SQL_USER` / `MY2SQL_PASSWORD`。
+- 显式传 flag 时，flag 覆盖环境变量。
+- 环境变量仅在缺省 flag 时读取，不会出现在 `--help` 输出里。
+
+下文示例为说明参数仍写出 `--user` / `--password`，实际使用建议改用上述环境变量方式。
+
 `file` 模式生成 rollback SQL：
 
 ```bash
@@ -213,8 +231,8 @@ summary 固定包含以下列：
 | `--mode` | 输入模式，`repl` 或 `file` | 默认 `repl` |
 | `--host` | MySQL 地址 | 默认 `127.0.0.1` |
 | `--port` | MySQL 端口 | 默认 `3306` |
-| `--user` | MySQL 用户 | 必填场景下自行提供 |
-| `--password` | MySQL 密码 | 必填场景下自行提供 |
+| `--user` | MySQL 用户 | 不传时回落到环境变量 `MY2SQL_USER` |
+| `--password` | MySQL 密码 | 不传时回落到环境变量 `MY2SQL_PASSWORD` |
 | `--mysql-type` | MySQL 类型，`mysql` 或 `mariadb` | 默认 `mysql` |
 | `--server-id` | `repl` 模式下作为复制 slave 的 server id | 默认 `1113306` |
 | `--local-binlog-file` | `file` 模式要解析的本地 binlog 文件 | `file` 模式必填 |
